@@ -10,5 +10,6 @@
 - Gitee: https://gitee.com/architectzy/DetailAdvisor
 
 ## 自动化
-- T4 每日 02:00 检查项目并更新开发计划
-- T5 每日 03:00 完成小步开发并 commit + push
+- T4 每日 02:30 写当日增量计划到 `.plan/`
+- T5 每日 03:30 按 `.plan/` 计划做小步开发并 commit + push(Gitee 优先,GitHub 兜底)
+- 计划命名约定:`.plan/YYYYMMDD.md` = 当日要执行的 plan(T4 提前 24h 写好)
