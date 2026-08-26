@@ -1,5 +1,7 @@
 .DS_Store
 *.log
+# 反转: 巡检日志目录 .Log/ 不应被 *.log 误伤(0827 巡检发现并修复)
+!.Log/
 node_modules/
 .venv/
 __pycache__/
