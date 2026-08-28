@@ -1,7 +1,51 @@
 .DS_Store
 *.log
+
 # 反转: 巡检日志目录 .Log/ 不应被 *.log 误伤(0827 巡检发现并修复)
 !.Log/
-node_modules/
+
+# Python venv (预留 / 暂未启用)
 .venv/
 __pycache__/
+
+# ============================================================
+# Next.js 14+ (2026-08-29 骨架落地 · 0828 巡检高优建议兑现)
+# ============================================================
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (可以按需 opt-in commit)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
