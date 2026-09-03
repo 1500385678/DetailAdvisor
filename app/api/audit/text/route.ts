@@ -1,22 +1,34 @@
 /**
- * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02
+ * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则
  *
- * Phase 1 §6 模块 1"上线文案审查器"启动 + 首次增量
+ * Phase 1 §6 模块 1"上线文案审查器"启动 + 增量扩展
  * - 2026-09-02 T5 03:30:启动 commit,落 R-READ-01 句长上限
  * - 2026-09-03 T5 03:30:增量 R-READ-02 句首连词堆叠(零依赖,纯机检)
+ * - 2026-09-04 T5 03:30:增量 v0.1 错别字 3 条 + v0.3 语气可读性 2 条(零依赖纯机检)
+ *   - R-TYPO-02 多字/漏字/重复字(叠词白名单)
+ *   - R-TYPO-03 标点符号错误(中英文混用)
+ *   - R-TYPO-05 全角/半角混用
+ *   - R-TONE-02 否定句否定词置顶
+ *   - R-TONE-03 语气一致性
  *
- * 当前已实现 2 条规则(均纯机检,零外部依赖):
+ * 当前已实现 7 条规则(均纯机检,零外部依赖):
  * - R-READ-01 句长上限(移动端 28 / 桌面端 40)
  * - R-READ-02 句首连词堆叠(≥2 个连词连用)
+ * - R-TYPO-02 多字/漏字/重复字
+ * - R-TYPO-03 中英文标点混用
+ * - R-TYPO-05 全角/半角混用
+ * - R-TONE-02 "请不要"/"请勿" 引导句式
+ * - R-TONE-03 4 类语气词频次一致性
  *
- * 后续版本扩展(v0.1 API / v0.2 API / v0.3 API):
- * - v0.1 API:R-TYPO-01~05 错别字 5 条 + 敏感词 2 级(需 hanlp/外部字典)
- * - v0.2 API:R-BRAND-01~04 品牌词 4 条(品牌词表本身是外部依赖,Phase 0 第 2 项)
- * - v0.3 API:R-TONE-01~03 语气 3 条(LLM 二次校验需 API key)+ R-READ-03 信息密度
+ * 后续版本扩展:
+ * - v0.1 API:R-TYPO-01 同音字(需 hanlp 字典)+ R-TYPO-04 量词(需 LLM)
+ * - v0.2 API:R-BRAND-01~04 品牌词 4 条(品牌词表本身是外部依赖,Phase 0 外部依赖 0904 起降级到 Phase 1.5)
+ * - v0.3 API:R-TONE-01 二义性(需 LLM 二次校验)+ R-READ-03 信息密度(需 LLM)
  *
  * 关联文档:
  * - 项目开发计划.md §3 模块 1 + §6 Phase 1 MVP
- * - docs/审查规则/v0.3_文案审查_语气_可读性.md §4 R-READ-01/02
+ * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05
+ * - docs/审查规则/v0.3_文案审查_语气_可读性.md §3 R-TONE-02/03
  * - docs/api/audit-text-v0.1.md
  */
 import { NextResponse } from "next/server";
@@ -57,11 +69,56 @@ interface Read02Hit {
   match_text: string;
 }
 
+interface Typo02Hit {
+  rule: "R-TYPO-02";
+  text: string;
+  position: number;
+  match: string;
+  whitelist_hit: boolean;
+}
+
+interface Typo03Hit {
+  rule: "R-TYPO-03";
+  text: string;
+  position: number;
+  expected: string;
+  actual: string;
+  primary_script: "cjk" | "latin";
+}
+
+interface Typo05Hit {
+  rule: "R-TYPO-05";
+  text: string;
+  position: number;
+  match: string;
+  category: "fullwidth-digit" | "fullwidth-letter";
+}
+
+interface Tone02Hit {
+  rule: "R-TONE-02";
+  sentence: string;
+  matched_phrase: string;
+  position: number;
+}
+
+interface Tone03Hit {
+  rule: "R-TONE-03";
+  counts: Record<string, number>;
+  dominant: string;
+  dominant_ratio: number;
+  threshold: number;
+}
+
 interface AuditResponse {
   verdict: "PASS" | "SOFT_WARN" | "HARD_BLOCK";
   score_deduction: number;
   read_hits: ReadHit[];
   read02_hits: Read02Hit[];
+  typo02_hits: Typo02Hit[];
+  typo03_hits: Typo03Hit[];
+  typo05_hits: Typo05Hit[];
+  tone02_hits: Tone02Hit[];
+  tone03_hits: Tone03Hit[];
   summary: string;
   meta: {
     rules_evaluated: string[];
@@ -97,6 +154,14 @@ const SURFACE_TO_LIMIT: Record<"mobile" | "desktop", number> = {
 
 /** 单条文案扣分上限(对齐 v0.3 §4 R-READ-01) */
 const MAX_DEDUCTION = 5;
+
+/** 各规则独立扣分上限(软调规则比硬错规则上限更小) */
+const READ02_MAX = 3;
+const TYPO02_MAX = 3;
+const TYPO03_MAX = 3;
+const TYPO05_MAX = 3;
+const TONE02_MAX = 2;
+const TONE03_MAX = 2;
 
 /**
  * 按标点切分文本为句子(保留原顺序,过滤空字符串)
@@ -231,7 +296,303 @@ function checkRead02(text: string): { hits: Read02Hit[]; score: number } {
         match_start,
         match_text,
       });
-      score = Math.min(score + 1, 3);
+      score = Math.min(score + 1, READ02_MAX);
+    }
+  }
+
+  return { hits, score };
+}
+
+// ============================================================
+// R-TYPO-02 实现(纯 regex,无外部依赖)
+// 规则:同一汉字连续出现 ≥ 2 次,标记 [dup],除非为叠词/拟声词
+// 阈值:命中即报,白名单豁免
+// 扣分:每命中 1 处 1 分,单条上限 3 分
+// ============================================================
+
+/**
+ * 叠词/拟声词白名单(常见合法叠字)
+ * - 拟声词: 哈哈/呵呵/嘻嘻/嘿嘿/哼哼/嗯嗯/啊啊/哦哦/噢噢/啧啧
+ * - 形容词叠词: 慢慢/看看/干干净净/高高兴兴/仔仔细细/清清楚楚/明明白白/老老实实/...
+ * - 副词叠词: 吞吞吐吐/大大咧咧/婆婆妈妈/偷偷摸摸/马马虎虎
+ * - 量词叠词: 家家户户/男男女女/老老少少/里里外外/上上下下/前前后后/左左右右
+ */
+const REDUPLICATION_WHITELIST = new Set<string>([
+  // 拟声词/语气词
+  "哈哈", "呵呵", "嘻嘻", "嘿嘿", "哼哼", "嗯嗯", "啊啊", "哦哦", "噢噢", "啧啧",
+  "呀呀", "哎哎", "喔喔", "哇哇", "嗨嗨", "呸呸",
+  // 形容词叠词
+  "看看", "慢慢", "快快", "早早", "晚晚", "常常", "往往", "刚刚", "恰恰", "仅仅",
+  "干干净净", "高高兴兴", "仔仔细细", "清清楚楚", "明明白白", "老老实实", "实实在在",
+  "踏踏实实", "马马虎虎", "说说笑笑", "来来往往", "形形色色", "原原本本", "开开心心",
+  "快快乐乐", "轻轻松松", "简简单单", "平平安安", "团团圆圆", "红红火火", "热热闹闹",
+  "漂漂亮亮", "整整齐齐", "严严实实", "结结实实", "安安静静", "风风雨雨", "日日夜夜",
+  "世世代代", "吞吞吐吐", "大大咧咧", "婆婆妈妈", "偷偷摸摸", "隐隐约约", "朦朦胧胧",
+  "浩浩荡荡", "轰轰烈烈", "沸沸扬扬", "纷纷扬扬", "郁郁葱葱", "袅袅婷婷", "堂堂正正",
+  "唯唯诺诺", "浑浑噩噩", "昏昏沉沉", "恍恍惚惚", "疯疯癫癫", "战战兢兢", "鬼鬼祟祟",
+  "坑坑洼洼", "密密麻麻", "稀稀拉拉", "零零散散", "断断续续", "浩浩汤汤", "泱泱大国",
+  // 量词/代词叠词
+  "家家户户", "男男女女", "老老少少", "里里外外", "上上下下", "前前后后", "左左右右",
+  "方方面面", "时时刻刻", "分分秒秒", "年年岁岁", "朝朝暮暮", "日日夜夜", "字字句句",
+  "点点滴滴", "方方面面", "林林总总", "莘莘学子",
+  // 动词叠词
+  "走走", "跑跑", "跳跳", "听听", "说说", "读读", "写写", "想想", "试试", "做做",
+  "看看", "笑笑", "哭哭", "聊聊", "谈谈", "问问", "查查", "找找", "等等", "比比",
+  "算算", "选选", "挑挑", "逛逛", "转转", "玩玩", "睡睡", "歇歇", "坐坐", "站站",
+  "歇歇", "种种", "买买", "卖卖", "送送", "收收", "洗洗", "刷刷", "擦擦", "扫扫",
+  "打打", "敲敲", "摸摸", "碰碰", "动动", "推推", "拉拉", "搬搬", "抬抬", "拎拎",
+]);
+
+/** 连续重复字符 regex(unicode-aware,匹配同一字符连续 ≥ 2 次) */
+const DUP_CHAR_RE = /(.)\1{1,}/gu;
+
+/**
+ * R-TYPO-02 多字/漏字/重复字检测
+ * - 找出所有连续重复字符(≥ 2 次)
+ * - 不在白名单的视为 [dup] 命中
+ * - 跳过空白/纯标点的伪内容
+ */
+function checkTypo02(text: string): { hits: Typo02Hit[]; score: number } {
+  const hits: Typo02Hit[] = [];
+  let score = 0;
+
+  // 用 matchAll 找出所有匹配
+  const matches = text.matchAll(DUP_CHAR_RE);
+  for (const m of matches) {
+    const match = m[0];
+    const position = m.index ?? 0;
+    // 白名单检查
+    if (REDUPLICATION_WHITELIST.has(match)) continue;
+    hits.push({
+      rule: "R-TYPO-02",
+      text: match,
+      position,
+      match,
+      whitelist_hit: false,
+    });
+    score = Math.min(score + 1, TYPO02_MAX);
+  }
+
+  return { hits, score };
+}
+
+// ============================================================
+// R-TYPO-03 实现(纯 regex,无外部依赖)
+// 规则:中文文本禁止出现纯英文标点(, ; : ? !),反之亦然
+// 阈值:每出现 1 个混用标点,扣 1 分,单条上限 3 分
+// ============================================================
+
+/** 中文字符 unicode 范围(CJK Unified Ideographs 基本平面) */
+const CJK_RE = /[\u4e00-\u9fff]/;
+
+/** 英文标点(在中文中应改用全角) */
+const LATIN_PUNCT_IN_CJK = [",", ";", ":", "?", "!"];
+/** 中文标点(在英文中应改用半角) */
+const CJK_PUNCT_IN_LATIN = ["，", "；", "：", "？", "！"];
+
+/**
+ * R-TYPO-03 中英文标点混用检测
+ * - 主语种判断:文本中是否含中文字符
+ * - 中文文本: 出现英文 , ; : ? ! → 报
+ * - 英文文本: 出现中文 ， ； ： ？ ！ → 报
+ */
+function checkTypo03(text: string): { hits: Typo03Hit[]; score: number } {
+  const hits: Typo03Hit[] = [];
+  let score = 0;
+
+  const hasCJK = CJK_RE.test(text);
+  const primary_script: "cjk" | "latin" = hasCJK ? "cjk" : "latin";
+
+  if (hasCJK) {
+    // 中文文本:扫英文标点
+    for (const punct of LATIN_PUNCT_IN_CJK) {
+      let from = 0;
+      while (true) {
+        const idx = text.indexOf(punct, from);
+        if (idx === -1) break;
+        // 简单映射:英文 , → 中文 ，
+        const expected = ({ ",": "，", ";": "；", ":": "：", "?": "？", "!": "！" })[punct] ?? punct;
+        hits.push({
+          rule: "R-TYPO-03",
+          text: punct,
+          position: idx,
+          expected,
+          actual: punct,
+          primary_script,
+        });
+        score = Math.min(score + 1, TYPO03_MAX);
+        from = idx + 1;
+      }
+    }
+  } else {
+    // 英文文本:扫中文标点
+    for (const punct of CJK_PUNCT_IN_LATIN) {
+      let from = 0;
+      while (true) {
+        const idx = text.indexOf(punct, from);
+        if (idx === -1) break;
+        const expected = ({ "，": ",", "；": ";", "：": ":", "？": "?", "！": "!" })[punct] ?? punct;
+        hits.push({
+          rule: "R-TYPO-03",
+          text: punct,
+          position: idx,
+          expected,
+          actual: punct,
+          primary_script,
+        });
+        score = Math.min(score + 1, TYPO03_MAX);
+        from = idx + 1;
+      }
+    }
+  }
+
+  return { hits, score };
+}
+
+// ============================================================
+// R-TYPO-05 实现(纯 regex,无外部依赖)
+// 规则:数字、字母在半角/全角之间必须一致
+// 阈值:每出现 1 处混用,扣 1 分,单条上限 3 分
+// ============================================================
+
+/** 全角数字 ０-９ (U+FF10 - U+FF19) */
+const FULLWIDTH_DIGIT_RE = /[０-９]/g;
+/** 全角字母 Ａ-Ｚ ａ-ｚ (U+FF21 - U+FF3A, U+FF41 - U+FF5A) */
+const FULLWIDTH_LETTER_RE = /[Ａ-Ｚａ-ｚ]/g;
+
+/**
+ * R-TYPO-05 全角/半角混用检测
+ * - 扫全角数字 → 报
+ * - 扫全角字母 → 报
+ * - 不做"中文+数字空格"检测(留 v0.1 API 后续扩展)
+ */
+function checkTypo05(text: string): { hits: Typo05Hit[]; score: number } {
+  const hits: Typo05Hit[] = [];
+  let score = 0;
+
+  for (const m of text.matchAll(FULLWIDTH_DIGIT_RE)) {
+    hits.push({
+      rule: "R-TYPO-05",
+      text: m[0],
+      position: m.index ?? 0,
+      match: m[0],
+      category: "fullwidth-digit",
+    });
+    score = Math.min(score + 1, TYPO05_MAX);
+  }
+  for (const m of text.matchAll(FULLWIDTH_LETTER_RE)) {
+    hits.push({
+      rule: "R-TYPO-05",
+      text: m[0],
+      position: m.index ?? 0,
+      match: m[0],
+      category: "fullwidth-letter",
+    });
+    score = Math.min(score + 1, TYPO05_MAX);
+  }
+
+  return { hits, score };
+}
+
+// ============================================================
+// R-TONE-02 实现(纯 regex,无外部依赖)
+// 规则:否定句否定词应紧贴动词/被修饰语,避免"请不要" / "请勿" 引导
+// 阈值:命中即报(warn 级,只提示不强制)
+// 扣分:每命中 1 句 1 分,单条上限 2 分
+// ============================================================
+
+/** 否定句引导词白名单(命中即报) */
+const NEGATION_PHRASES = ["请不要", "请勿"] as const;
+
+/**
+ * R-TONE-02 否定句否定词置顶检测
+ * - 扫每个句子
+ * - 命中"请不要" / "请勿" → 报
+ * - LLM 二次校验留 v0.3 API 后续扩展
+ */
+function checkTone02(text: string): { hits: Tone02Hit[]; score: number } {
+  const sentences = splitSentences(text);
+  const hits: Tone02Hit[] = [];
+  let score = 0;
+
+  for (const sentence of sentences) {
+    const trimmed = sentence.trim();
+    if (trimmed.length === 0) continue;
+    for (const phrase of NEGATION_PHRASES) {
+      const idx = trimmed.indexOf(phrase);
+      if (idx !== -1) {
+        hits.push({
+          rule: "R-TONE-02",
+          sentence: trimmed,
+          matched_phrase: phrase,
+          position: idx,
+        });
+        score = Math.min(score + 1, TONE02_MAX);
+        break; // 一句只报一次
+      }
+    }
+  }
+
+  return { hits, score };
+}
+
+// ============================================================
+// R-TONE-03 实现(纯 regex,无外部依赖)
+// 规则:4 类语气词频次应统一,占比最大 < 70% 即报
+// 阈值:warn 级,提示"主语气词建议统一为 X(占 65%)"
+// 扣分:命中 1 次 1 分,单条上限 2 分
+// ============================================================
+
+/** 4 类语气词词典(对齐 v0.3 §3 R-TONE-03) */
+const TONE_WORDS: Record<string, RegExp> = {
+  请: /请(?![不要勿])/g, // "请" 后不接 "不要" / "勿"(避免与 R-TONE-02 重)
+  麻烦: /麻烦/g,
+  建议: /建议/g,
+  温馨提示: /温馨提示|提示/g, // "提示" 兜底,因短文案里"温馨提示"经常省略
+};
+
+/** 主语气词占比阈值 */
+const TONE03_THRESHOLD = 0.7;
+
+/**
+ * R-TONE-03 语气一致性检测
+ * - 统计 4 类语气词频次
+ * - 找出最大占比
+ * - < 70% 即报
+ */
+function checkTone03(text: string): { hits: Tone03Hit[]; score: number } {
+  const counts: Record<string, number> = {};
+  let total = 0;
+  for (const [name, re] of Object.entries(TONE_WORDS)) {
+    const matches = text.match(re);
+    const count = matches ? matches.length : 0;
+    counts[name] = count;
+    total += count;
+  }
+
+  const hits: Tone03Hit[] = [];
+  let score = 0;
+
+  if (total >= 3) {
+    // 至少 3 个语气词才做一致性检查(避免短文案过度敏感)
+    let dominant = "";
+    let maxCount = 0;
+    for (const [name, count] of Object.entries(counts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        dominant = name;
+      }
+    }
+    const ratio = total === 0 ? 0 : maxCount / total;
+    if (ratio < TONE03_THRESHOLD) {
+      hits.push({
+        rule: "R-TONE-03",
+        counts,
+        dominant,
+        dominant_ratio: Number(ratio.toFixed(3)),
+        threshold: TONE03_THRESHOLD,
+      });
+      score = Math.min(1, TONE03_MAX);
     }
   }
 
@@ -275,10 +636,34 @@ export async function POST(request: Request) {
   // R-READ-02 检测(句首连词堆叠)
   const { hits: read02Hits, score: read02Score } = checkRead02(body.text);
 
-  // 总扣分(READ-01 + READ-02 累加,各规则独立上限)
-  const totalScore = Math.min(read01Score + read02Score, MAX_DEDUCTION);
+  // R-TYPO-02 检测(多字/漏字/重复字)
+  const { hits: typo02Hits, score: typo02Score } = checkTypo02(body.text);
 
-  // verdict 映射(本 API 雏形只有 READ 类,无 HARD_BLOCK)
+  // R-TYPO-03 检测(中英文标点混用)
+  const { hits: typo03Hits, score: typo03Score } = checkTypo03(body.text);
+
+  // R-TYPO-05 检测(全角/半角混用)
+  const { hits: typo05Hits, score: typo05Score } = checkTypo05(body.text);
+
+  // R-TONE-02 检测(否定句否定词置顶)
+  const { hits: tone02Hits, score: tone02Score } = checkTone02(body.text);
+
+  // R-TONE-03 检测(语气一致性)
+  const { hits: tone03Hits, score: tone03Score } = checkTone03(body.text);
+
+  // 总扣分(7 规则累加,单条上限 5 分)
+  const totalScore = Math.min(
+    read01Score +
+      read02Score +
+      typo02Score +
+      typo03Score +
+      typo05Score +
+      tone02Score +
+      tone03Score,
+    MAX_DEDUCTION,
+  );
+
+  // verdict 映射(本 API 雏形只有软调类规则,无 HARD_BLOCK)
   // 0 分 → PASS, ≥1 分 → SOFT_WARN(软调,不阻塞)
   const verdict: AuditResponse["verdict"] = totalScore === 0 ? "PASS" : "SOFT_WARN";
 
@@ -287,14 +672,36 @@ export async function POST(request: Request) {
     score_deduction: totalScore,
     read_hits: hits,
     read02_hits: read02Hits,
-    summary: buildSummary(hits, read02Hits, surface, limit, read01Score, read02Score),
+    typo02_hits: typo02Hits,
+    typo03_hits: typo03Hits,
+    typo05_hits: typo05Hits,
+    tone02_hits: tone02Hits,
+    tone03_hits: tone03Hits,
+    summary: buildSummary({
+      read01: { hits, score: read01Score, surface, limit },
+      read02: { hits: read02Hits, score: read02Score },
+      typo02: { hits: typo02Hits, score: typo02Score },
+      typo03: { hits: typo03Hits, score: typo03Score },
+      typo05: { hits: typo05Hits, score: typo05Score },
+      tone02: { hits: tone02Hits, score: tone02Score },
+      tone03: { hits: tone03Hits, score: tone03Score },
+    }),
     meta: {
-      rules_evaluated: ["R-READ-01", "R-READ-02"],
+      rules_evaluated: [
+        "R-READ-01",
+        "R-READ-02",
+        "R-TYPO-02",
+        "R-TYPO-03",
+        "R-TYPO-05",
+        "R-TONE-02",
+        "R-TONE-03",
+      ],
       rules_skipped: [
-        "R-TYPO-01~05(留 v0.1 API,需 hanlp/外部字典)",
-        "R-BRAND-01~04(留 v0.2 API,需品牌词表)",
-        "R-TONE-01~03(留 v0.3 API,需 LLM 二次校验)",
-        "R-READ-03(留 v0.3 API,需 LLM 信息密度提取)",
+        "R-TYPO-01(同音字,需 hanlp 字典)",
+        "R-TYPO-04(量词,需 LLM 常识校验)",
+        "R-BRAND-01~04(品牌词,需品牌词表,Phase 0 外部依赖,0904 起降级到 Phase 1.5)",
+        "R-TONE-01(二义性,需 LLM 二次校验)",
+        "R-READ-03(信息密度,需 LLM 提取)",
       ],
       scene_resolved: scene,
       text_length: unicodeLength(body.text),
@@ -304,25 +711,61 @@ export async function POST(request: Request) {
   return NextResponse.json(response, { status: 200 });
 }
 
-/** 拼装 summary(支持 R-READ-01 / R-READ-02 各自命中) */
-function buildSummary(
-  hits: ReadHit[],
-  read02Hits: Read02Hit[],
-  surface: "mobile" | "desktop",
-  limit: number,
-  read01Score: number,
-  read02Score: number,
-): string {
+interface RuleSummary {
+  read01: { hits: ReadHit[]; score: number; surface: "mobile" | "desktop"; limit: number };
+  read02: { hits: Read02Hit[]; score: number };
+  typo02: { hits: Typo02Hit[]; score: number };
+  typo03: { hits: Typo03Hit[]; score: number };
+  typo05: { hits: Typo05Hit[]; score: number };
+  tone02: { hits: Tone02Hit[]; score: number };
+  tone03: { hits: Tone03Hit[]; score: number };
+}
+
+/** 拼装 summary(支持 7 规则各自命中) */
+function buildSummary(s: RuleSummary): string {
   const parts: string[] = [];
-  if (hits.length === 0) {
-    parts.push(`R-READ-01 通过(${surface} 端上限 ${limit} 字符)`);
+  // R-READ-01
+  if (s.read01.hits.length === 0) {
+    parts.push(`R-READ-01 通过(${s.read01.surface} 端上限 ${s.read01.limit} 字符)`);
   } else {
-    parts.push(`R-READ-01 命中 ${hits.length} 个超长句,扣 ${read01Score} 分`);
+    parts.push(`R-READ-01 命中 ${s.read01.hits.length} 个超长句,扣 ${s.read01.score} 分`);
   }
-  if (read02Hits.length === 0) {
+  // R-READ-02
+  if (s.read02.hits.length === 0) {
     parts.push(`R-READ-02 通过(无句首连词堆叠)`);
   } else {
-    parts.push(`R-READ-02 命中 ${read02Hits.length} 个堆叠句,扣 ${read02Score} 分`);
+    parts.push(`R-READ-02 命中 ${s.read02.hits.length} 个堆叠句,扣 ${s.read02.score} 分`);
+  }
+  // R-TYPO-02
+  if (s.typo02.hits.length === 0) {
+    parts.push(`R-TYPO-02 通过(无叠字错误)`);
+  } else {
+    parts.push(`R-TYPO-02 命中 ${s.typo02.hits.length} 处叠字,扣 ${s.typo02.score} 分`);
+  }
+  // R-TYPO-03
+  if (s.typo03.hits.length === 0) {
+    parts.push(`R-TYPO-03 通过(标点无中英混用)`);
+  } else {
+    parts.push(`R-TYPO-03 命中 ${s.typo03.hits.length} 个混用标点,扣 ${s.typo03.score} 分`);
+  }
+  // R-TYPO-05
+  if (s.typo05.hits.length === 0) {
+    parts.push(`R-TYPO-05 通过(无全角/半角混用)`);
+  } else {
+    parts.push(`R-TYPO-05 命中 ${s.typo05.hits.length} 处全角字符,扣 ${s.typo05.score} 分`);
+  }
+  // R-TONE-02
+  if (s.tone02.hits.length === 0) {
+    parts.push(`R-TONE-02 通过(无"请不要/请勿"引导)`);
+  } else {
+    parts.push(`R-TONE-02 命中 ${s.tone02.hits.length} 句,扣 ${s.tone02.score} 分`);
+  }
+  // R-TONE-03
+  if (s.tone03.hits.length === 0) {
+    parts.push(`R-TONE-03 通过(语气词占比 ${s.tone03.hits[0]?.dominant_ratio ?? "n/a"} ≥ 0.7)`);
+  } else {
+    const hit = s.tone03.hits[0];
+    parts.push(`R-TONE-03 命中(主语气词"${hit.dominant}"仅占 ${(hit.dominant_ratio * 100).toFixed(1)}%),扣 ${s.tone03.score} 分`);
   }
   return parts.join(";");
 }
@@ -332,7 +775,7 @@ export async function GET() {
   return NextResponse.json(
     {
       api: "DetailAdvisor · 文案审查",
-      version: "0.1.0-API-雏形+R-READ-02",
+      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则",
       method: "POST",
       endpoint: "/api/audit/text",
       content_type: "application/json",
@@ -343,11 +786,18 @@ export async function GET() {
       rules_implemented: [
         "R-READ-01(句长上限,移动端 28 / 桌面端 40)",
         "R-READ-02(句首连词堆叠,≥2 个连词连用)",
+        "R-TYPO-02(多字/漏字/重复字,叠词白名单豁免)",
+        "R-TYPO-03(中英文标点混用检测)",
+        "R-TYPO-05(全角/半角混用检测)",
+        "R-TONE-02(否定句否定词置顶,检测'请不要'/'请勿')",
+        "R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)",
       ],
-      rules_planned: [
-        "v0.1 API:R-TYPO-01~05 错别字 5 条 + 敏感词 2 级",
-        "v0.2 API:R-BRAND-01~04 品牌词 4 条",
-        "v0.3 API:R-TONE-01~03 语气 3 条 + R-READ-03 信息密度",
+      rules_skipped: [
+        "R-TYPO-01(同音字,需 hanlp 字典)",
+        "R-TYPO-04(量词,需 LLM)",
+        "R-BRAND-01~04(品牌词,需品牌词表,Phase 1.5)",
+        "R-TONE-01(二义性,需 LLM)",
+        "R-READ-03(信息密度,需 LLM)",
       ],
       docs: "docs/api/audit-text-v0.1.md",
     },

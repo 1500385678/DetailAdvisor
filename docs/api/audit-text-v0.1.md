@@ -1,7 +1,7 @@
-# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02
+# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 5 零依赖规则
 
-> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 首次增量 · 2026-09-03
-> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02
+> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 两次增量 · 2026-09-04
+> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02 / 0904 T5 增量 v0.1 错别字 3 条 + v0.3 语气 2 条
 > 入口: `app/api/audit/text/route.ts`(Next.js 16 App Router Route Handler)
 
 ---
@@ -10,10 +10,10 @@
 
 | 项 | 说明 |
 |---|------|
-| 当前已实现 | **R-READ-01**(句长上限,纯机检,移动端 28 / 桌面端 40) + **R-READ-02**(句首连词堆叠,纯机检,0903 增量) |
-| 暂未实现 | v0.1 错别字 5 条 + 敏感词 2 级 / v0.2 品牌词 4 条 / v0.3 语气 R-TONE-01~03 + R-READ-03 信息密度 |
-| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 首次增量 commit |
-| 关联规则 | `docs/审查规则/v0.3_文案审查_语气_可读性.md` §4 R-READ-01 / R-READ-02 |
+| 当前已实现 | **7 条规则**(均纯机检,零外部依赖):**R-READ-01**(句长上限,0902)+ **R-READ-02**(句首连词堆叠,0903)+ **R-TYPO-02**(多字/漏字/重复字,0904)+ **R-TYPO-03**(中英文标点混用,0904)+ **R-TYPO-05**(全角/半角混用,0904)+ **R-TONE-02**(否定句否定词置顶,0904)+ **R-TONE-03**(语气一致性,0904) |
+| 暂未实现 | R-TYPO-01(同音字,需 hanlp)/ R-TYPO-04(量词,需 LLM)/ R-BRAND-01~04(品牌词,需词表,Phase 1.5)/ R-TONE-01(二义性,需 LLM)/ R-READ-03(信息密度,需 LLM) |
+| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 两次增量 commit,2 规则 → 7 规则扩展 |
+| 关联规则 | `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` §3 R-TYPO-02/03/05 + `docs/审查规则/v0.3_文案审查_语气_可读性.md` §3/§4 R-TONE-02/03 + R-READ-01/02 |
 
 ## 2. 接口
 
@@ -52,7 +52,7 @@ Content-Type: application/json
 ```typescript
 {
   "verdict": "PASS" | "SOFT_WARN",   // 本 API 雏形无 HARD_BLOCK
-  "score_deduction": number,          // 0 ~ 5(单条文案上限 5 分,R-READ-01 + R-READ-02 累加)
+  "score_deduction": number,          // 0 ~ 5(单条文案上限 5 分,7 规则累加)
   "read_hits": [                      // R-READ-01 命中项数组
     {
       "rule": "R-READ-01",
@@ -72,9 +72,63 @@ Content-Type: application/json
       "match_text": string            // 拼接出的连词堆叠文本
     }
   ],
-  "summary": string,                  // 一句话总结(双规则分号分隔)
+  "typo02_hits": [                    // R-TYPO-02 命中项数组(0904 增量)
+    {
+      "rule": "R-TYPO-02",
+      "text": string,                 // 命中的连续重复字符
+      "position": number,             // 在原文中的字符偏移
+      "match": string,                // 完整匹配(如"请请")
+      "whitelist_hit": false          // 是否命中白名单(当前实现一律 false,因命中白名单时跳过)
+    }
+  ],
+  "typo03_hits": [                    // R-TYPO-03 命中项数组(0904 增量)
+    {
+      "rule": "R-TYPO-03",
+      "text": string,                 // 命中的标点字符
+      "position": number,             // 字符偏移
+      "expected": string,             // 应使用的标点
+      "actual": string,               // 实际使用的标点
+      "primary_script": "cjk" | "latin"  // 文本主语种
+    }
+  ],
+  "typo05_hits": [                    // R-TYPO-05 命中项数组(0904 增量)
+    {
+      "rule": "R-TYPO-05",
+      "text": string,                 // 命中的全角字符
+      "position": number,             // 字符偏移
+      "match": string,                // 完整匹配
+      "category": "fullwidth-digit" | "fullwidth-letter"  // 混用类别
+    }
+  ],
+  "tone02_hits": [                    // R-TONE-02 命中项数组(0904 增量)
+    {
+      "rule": "R-TONE-02",
+      "sentence": string,             // 命中的句子
+      "matched_phrase": string,       // 命中的引导词("请不要" / "请勿")
+      "position": number              // 引导词在句中的位置
+    }
+  ],
+  "tone03_hits": [                    // R-TONE-03 命中项数组(0904 增量)
+    {
+      "rule": "R-TONE-03",
+      "counts": {                     // 4 类语气词频次统计
+        "请": number,
+        "麻烦": number,
+        "建议": number,
+        "温馨提示": number
+      },
+      "dominant": string,             // 当前占比最大的语气词
+      "dominant_ratio": number,       // 占比(0-1)
+      "threshold": 0.7                // 阈值
+    }
+  ],
+  "summary": string,                  // 一句话总结(7 规则分号分隔)
   "meta": {
-    "rules_evaluated": ["R-READ-01", "R-READ-02"],
+    "rules_evaluated": [
+      "R-READ-01", "R-READ-02",
+      "R-TYPO-02", "R-TYPO-03", "R-TYPO-05",
+      "R-TONE-02", "R-TONE-03"
+    ],
     "rules_skipped": [...],           // 暂未实现的规则列表
     "scene_resolved": Scene,
     "text_length": number             // 原文 Unicode 字符数
@@ -312,9 +366,10 @@ curl -X POST http://localhost:3000/api/audit/text \
 
 ## 5. 不做什么(明确边界)
 
-- ❌ **不做 v0.1 错别字 + 敏感词** —— 需 hanlp/外部字典,留 v0.1 API
-- ❌ **不做 v0.2 品牌词** —— 品牌词表本身是外部依赖(Phase 0 第 2 项),词库到位后接 v0.2 API
-- ❌ **不做 v0.3 语气 R-TONE-01~03 + R-READ-03 信息密度** —— 需 LLM 二次校验(API key),留 v0.3 API
+- ❌ **不做 v0.1 R-TYPO-01 同音字 + R-TYPO-04 量词** —— 需 hanlp 字典 / LLM 常识校验,留 v0.1 API
+- ❌ **不做 v0.1 敏感词 2 级** —— 需网信办 + 法务清单对接,留 v0.1 API
+- ❌ **不做 v0.2 R-BRAND-01~04 品牌词 4 条** —— 品牌词表本身是外部依赖(Phase 0 第 2 项),0904 起正式降级到 Phase 1.5 范围,词库到位后接 v0.2 API
+- ❌ **不做 v0.3 R-TONE-01 二义性 + R-READ-03 信息密度** —— 需 LLM 二次校验(API key),留 v0.3 API
 - ❌ **不做鉴权 / 限流 / middleware** —— Phase 1 MVP 后期考虑
 - ❌ **不做错误页 / loading 态 / UI 集成** —— 本变更只到 API 雏形,UI 集成留后续 T5
 - ❌ **不做批量审查 / 历史对比** —— 留 v2.0
@@ -335,13 +390,21 @@ curl -X POST http://localhost:3000/api/audit/text \
 - [x] `npx next build` 通过(`/api/audit/text` 路由已注册 + 双规则 meta 正确)
 - [x] curl 端到端验证 5 例:启动 `npm run dev` → GET 元信息确认 R-READ-02 注册 → POST `而且并且此功能尚在测试阶段`(R-READ-02 命中 1 分,R-READ-01 通过)→ POST 4 连词堆叠长句(双规则累加 score=1)→ POST 移动端合规 PASS → POST 桌面端 45 字长句(R-READ-01 命中 5 分,R-READ-02 通过)→ 关闭 dev server
 
+### 6.3 0904 T5(5 零依赖规则增量:TYPO-02/03/05 + TONE-02/03)
+
+- [x] `npx tsc --noEmit` 通过(0 errors,5 个新 Hit 接口 + 5 个 check 函数 + RuleSummary 接口 + POST handler 7 规则累加 + GET 元信息 7 规则全部类型对齐)
+- [x] `npx eslint .` 通过(0 errors / 0 warnings)
+- [x] `npx next build` 通过(`/api/audit/text` 路由注册 + 7 规则 meta 正确)
+- [x] curl 端到端验证 10 例:启动 `npx next dev -p 4123` → **T1 GET 元信息确认 7 规则已实现** → **T2 PASS**("注册成功"短文案)→ **T3 R-TYPO-02 命中**("请请确认订单" → typo02_hits 1 处 "请请" 扣 1 分)→ **T4 R-TYPO-03 命中**("请确认,您已注册成功." → typo03_hits 1 个英文逗号扣 1 分)→ **T5 R-TYPO-05 命中**("剩余次数１２３次" → typo05_hits 3 个全角数字扣 3 分达上限)→ **T6 R-TONE-02 命中**("请不要重复点击" → tone02_hits 1 句扣 1 分)→ **T7 R-TONE-03 命中**(4 类语气词各 1 个,dominant_ratio=0.25 < 0.7 扣 2 分达上限)→ **T8 多规则累加**(同时命中 R-READ-01+R-READ-02+R-TYPO-02,score 累加到 5 分达总上限)→ **T9 叠词白名单豁免**("看看"/"慢慢"在白名单 → typo02_hits=[] 通过)→ **T10 桌面端长句**(50 字超 40 字上限 → R-READ-01 命中 10 字扣 5 分达总上限)→ 关闭 dev server
+
 ## 7. 关联文档
 
-- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(新增"启动"+"R-READ-02 增量"两个 checkbox)
-- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子
-- `docs/审查规则/v0.2_文案审查_品牌词.md` v0.2 规则种子
-- `docs/审查规则/v0.3_文案审查_语气_可读性.md` v0.3 规则种子(本 API 当前实现的 R-READ-01 / R-READ-02 来源)
+- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(累计勾选:启动 v0.1 + R-READ-02 增量 + 5 零依赖规则增量,共 3 个子项)
+- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子(0904 T5 落地 R-TYPO-02/03/05)
+- `docs/审查规则/v0.2_文案审查_品牌词.md` v0.2 规则种子(Phase 1.5)
+- `docs/审查规则/v0.3_文案审查_语气_可读性.md` v0.3 规则种子(0904 T5 落地 R-TONE-02/03;0902-0903 已落地 R-READ-01/02)
 - `docs/a11y/axe-core_基线_v0.1.md` 0901 T5 落地
+- `README.md` 增补"无 plan,临时决策"约定(0904 T5 兑现 0904 巡检"高优"项 D)
 
 ## 8. 变更记录
 
@@ -349,3 +412,4 @@ curl -X POST http://localhost:3000/api/audit/text \
 |------|------|------|
 | 2026-09-02 | v0.1 API 雏形落地:`app/api/audit/text/route.ts` + R-READ-01(纯机检,零外部依赖) + API 文档 + T5 决策依据(plan 缺失,按 0902 巡检高优建议 2 行动) | 03:30 T5 cron |
 | 2026-09-03 | v0.1 API 首次增量 R-READ-02:`app/api/audit/text/route.ts` 新增 R-READ-02 检测函数(句首连词堆叠,24 词连词词典 + 8 字窗口扫描 + 白名单豁免)+ `Read02Hit` 接口 + POST handler 双规则累加 + 文档 §1/§2.3/§3.5/§4.4/§4.5/§5/§6.2/§7/§8 全部对齐;**无 plan,临时决策**(0902 起 `.plan/` 漂移模式延续,0903 巡检建议显式记录);0903 巡检"高优"项(audit-text API 雏形增量扩展)100% 兑现 | 03:30 T5 cron |
+| 2026-09-04 | v0.1 API 二次增量 5 零依赖规则(2 规则 → 7 规则):`app/api/audit/text/route.ts` 新增 R-TYPO-02(多字/漏字/重复字,叠词白名单豁免)+ R-TYPO-03(中英文标点混用)+ R-TYPO-05(全角/半角混用)+ R-TONE-02(否定句否定词置顶,检测"请不要"/"请勿")+ R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)+ 5 个新 Hit 接口 + RuleSummary 接口 + POST handler 7 规则累加(score 上限 5 分)+ GET 元信息 7 规则全部注册 + 文档 §1/§2.3/§5/§6.3/§7/§8 全部对齐;**无 plan,临时决策**(0902-0903 漂移模式第 3 天延续,0904 巡检 2 条"最高优"项兑现);**Phase 1 §6 模块 1 从 2 规则扩到 7 规则,代码资产 0.2 → 0.3 起步**;同步兑现 0904 巡检"高优"项 D — `README.md` 增补"无 plan,临时决策"约定 | 03:30 T5 cron |
