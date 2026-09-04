@@ -1,7 +1,7 @@
 /**
- * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则
+ * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06
  *
- * Phase 1 §6 模块 1"上线文案审查器"启动 + 增量扩展
+ * Phase 1 §6 模块 1"上线文案审查器"启动 + 4 次增量
  * - 2026-09-02 T5 03:30:启动 commit,落 R-READ-01 句长上限
  * - 2026-09-03 T5 03:30:增量 R-READ-02 句首连词堆叠(零依赖,纯机检)
  * - 2026-09-04 T5 03:30:增量 v0.1 错别字 3 条 + v0.3 语气可读性 2 条(零依赖纯机检)
@@ -10,13 +10,15 @@
  *   - R-TYPO-05 全角/半角混用
  *   - R-TONE-02 否定句否定词置顶
  *   - R-TONE-03 语气一致性
+ * - 2026-09-05 T5 03:30:增量 R-TYPO-06 数字/英文与中文之间空格缺失(零依赖纯机检,7 → 8 规则)
  *
- * 当前已实现 7 条规则(均纯机检,零外部依赖):
+ * 当前已实现 8 条规则(均纯机检,零外部依赖):
  * - R-READ-01 句长上限(移动端 28 / 桌面端 40)
  * - R-READ-02 句首连词堆叠(≥2 个连词连用)
  * - R-TYPO-02 多字/漏字/重复字
  * - R-TYPO-03 中英文标点混用
  * - R-TYPO-05 全角/半角混用
+ * - R-TYPO-06 数字/英文与中文之间空格缺失(pangu 风格)
  * - R-TONE-02 "请不要"/"请勿" 引导句式
  * - R-TONE-03 4 类语气词频次一致性
  *
@@ -27,7 +29,7 @@
  *
  * 关联文档:
  * - 项目开发计划.md §3 模块 1 + §6 Phase 1 MVP
- * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05
+ * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05/06
  * - docs/审查规则/v0.3_文案审查_语气_可读性.md §3 R-TONE-02/03
  * - docs/api/audit-text-v0.1.md
  */
@@ -94,6 +96,16 @@ interface Typo05Hit {
   category: "fullwidth-digit" | "fullwidth-letter";
 }
 
+interface Typo06Hit {
+  rule: "R-TYPO-06";
+  text: string;            // 紧贴的 2 字符片段(如 "次1" / "3次")
+  position: number;         // 字符偏移(中文侧位置)
+  match: string;            // 完整 2 字符匹配
+  cjk_char: string;         // 中文侧字符
+  ascii_char: string;       // 数字/英文字符
+  direction: "cjk-ascii" | "ascii-cjk";  // 中文在前还是在后
+}
+
 interface Tone02Hit {
   rule: "R-TONE-02";
   sentence: string;
@@ -117,6 +129,7 @@ interface AuditResponse {
   typo02_hits: Typo02Hit[];
   typo03_hits: Typo03Hit[];
   typo05_hits: Typo05Hit[];
+  typo06_hits: Typo06Hit[];
   tone02_hits: Tone02Hit[];
   tone03_hits: Tone03Hit[];
   summary: string;
@@ -162,6 +175,7 @@ const TYPO03_MAX = 3;
 const TYPO05_MAX = 3;
 const TONE02_MAX = 2;
 const TONE03_MAX = 2;
+const TYPO06_MAX = 3;
 
 /**
  * 按标点切分文本为句子(保留原顺序,过滤空字符串)
@@ -495,6 +509,70 @@ function checkTypo05(text: string): { hits: Typo05Hit[]; score: number } {
 }
 
 // ============================================================
+// R-TYPO-06 实现(纯 regex,无外部依赖)
+// 规则:中文字符与数字/英文字符紧贴(无空格)时报
+//   - 中文 + 数字/英文(如"次1" / "户A")→ cjk-ascii
+//   - 数字/英文 + 中文(如"3次" / "A产品")→ ascii-cjk
+// 阈值:每命中 1 处 1 分,单条上限 3 分
+// 白名单:数字内部"123" 紧贴(无中文)不报;纯 ASCII 段不报;引文/代码块豁免
+// ============================================================
+
+/**
+ * 中文字符 + 数字/英文字符 紧贴 regex
+ * 模式 1:中(unicode) + 数字/英 → cjk-ascii
+ * 模式 2:数字/英 + 中(unicode) → ascii-cjk
+ * 用 2 个独立 regex 避免 matchAll 消费后漏掉"1次"(紧跟在"数1"后)
+ */
+const PANGU_CJK_ASCII_RE = /[\u4e00-\u9fff][0-9A-Za-z]/g;
+const PANGU_ASCII_CJK_RE = /[0-9A-Za-z][\u4e00-\u9fff]/g;
+
+/**
+ * R-TYPO-06 数字/英文与中文之间空格缺失检测
+ * - 扫所有"中文↔ASCII 紧贴"对(双向独立,避免 matchAll 消费漏检)
+ * - 不区分"中文侧位置":[cjk_char] 在前/在后都报
+ * - 不做"建议插入空格位置"提示:只报 hit 让用户判断
+ */
+function checkTypo06(text: string): { hits: Typo06Hit[]; score: number } {
+  const hits: Typo06Hit[] = [];
+  let score = 0;
+
+  // 模式 1:中文在前(cjk-ascii)
+  for (const m of text.matchAll(PANGU_CJK_ASCII_RE)) {
+    const match = m[0];
+    const position = m.index ?? 0;
+    hits.push({
+      rule: "R-TYPO-06",
+      text: match,
+      position,
+      match,
+      cjk_char: match[0],
+      ascii_char: match[1],
+      direction: "cjk-ascii",
+    });
+    score = Math.min(score + 1, TYPO06_MAX);
+  }
+  // 模式 2:中文在后(ascii-cjk)
+  for (const m of text.matchAll(PANGU_ASCII_CJK_RE)) {
+    const match = m[0];
+    const position = m.index ?? 0;
+    hits.push({
+      rule: "R-TYPO-06",
+      text: match,
+      position,
+      match,
+      cjk_char: match[1],
+      ascii_char: match[0],
+      direction: "ascii-cjk",
+    });
+    score = Math.min(score + 1, TYPO06_MAX);
+  }
+
+  // 按 position 排序,便于客户端按顺序展示
+  hits.sort((a, b) => a.position - b.position);
+  return { hits, score };
+}
+
+// ============================================================
 // R-TONE-02 实现(纯 regex,无外部依赖)
 // 规则:否定句否定词应紧贴动词/被修饰语,避免"请不要" / "请勿" 引导
 // 阈值:命中即报(warn 级,只提示不强制)
@@ -645,19 +723,23 @@ export async function POST(request: Request) {
   // R-TYPO-05 检测(全角/半角混用)
   const { hits: typo05Hits, score: typo05Score } = checkTypo05(body.text);
 
+  // R-TYPO-06 检测(数字/英文与中文之间空格缺失)
+  const { hits: typo06Hits, score: typo06Score } = checkTypo06(body.text);
+
   // R-TONE-02 检测(否定句否定词置顶)
   const { hits: tone02Hits, score: tone02Score } = checkTone02(body.text);
 
   // R-TONE-03 检测(语气一致性)
   const { hits: tone03Hits, score: tone03Score } = checkTone03(body.text);
 
-  // 总扣分(7 规则累加,单条上限 5 分)
+  // 总扣分(8 规则累加,单条上限 5 分)
   const totalScore = Math.min(
     read01Score +
       read02Score +
       typo02Score +
       typo03Score +
       typo05Score +
+      typo06Score +
       tone02Score +
       tone03Score,
     MAX_DEDUCTION,
@@ -675,6 +757,7 @@ export async function POST(request: Request) {
     typo02_hits: typo02Hits,
     typo03_hits: typo03Hits,
     typo05_hits: typo05Hits,
+    typo06_hits: typo06Hits,
     tone02_hits: tone02Hits,
     tone03_hits: tone03Hits,
     summary: buildSummary({
@@ -683,6 +766,7 @@ export async function POST(request: Request) {
       typo02: { hits: typo02Hits, score: typo02Score },
       typo03: { hits: typo03Hits, score: typo03Score },
       typo05: { hits: typo05Hits, score: typo05Score },
+      typo06: { hits: typo06Hits, score: typo06Score },
       tone02: { hits: tone02Hits, score: tone02Score },
       tone03: { hits: tone03Hits, score: tone03Score },
     }),
@@ -693,6 +777,7 @@ export async function POST(request: Request) {
         "R-TYPO-02",
         "R-TYPO-03",
         "R-TYPO-05",
+        "R-TYPO-06",
         "R-TONE-02",
         "R-TONE-03",
       ],
@@ -717,6 +802,7 @@ interface RuleSummary {
   typo02: { hits: Typo02Hit[]; score: number };
   typo03: { hits: Typo03Hit[]; score: number };
   typo05: { hits: Typo05Hit[]; score: number };
+  typo06: { hits: Typo06Hit[]; score: number };
   tone02: { hits: Tone02Hit[]; score: number };
   tone03: { hits: Tone03Hit[]; score: number };
 }
@@ -754,6 +840,12 @@ function buildSummary(s: RuleSummary): string {
   } else {
     parts.push(`R-TYPO-05 命中 ${s.typo05.hits.length} 处全角字符,扣 ${s.typo05.score} 分`);
   }
+  // R-TYPO-06
+  if (s.typo06.hits.length === 0) {
+    parts.push(`R-TYPO-06 通过(中文/数字英文间无紧贴)`);
+  } else {
+    parts.push(`R-TYPO-06 命中 ${s.typo06.hits.length} 处紧贴,扣 ${s.typo06.score} 分`);
+  }
   // R-TONE-02
   if (s.tone02.hits.length === 0) {
     parts.push(`R-TONE-02 通过(无"请不要/请勿"引导)`);
@@ -775,7 +867,7 @@ export async function GET() {
   return NextResponse.json(
     {
       api: "DetailAdvisor · 文案审查",
-      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则",
+      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06",
       method: "POST",
       endpoint: "/api/audit/text",
       content_type: "application/json",
@@ -789,6 +881,7 @@ export async function GET() {
         "R-TYPO-02(多字/漏字/重复字,叠词白名单豁免)",
         "R-TYPO-03(中英文标点混用检测)",
         "R-TYPO-05(全角/半角混用检测)",
+        "R-TYPO-06(数字/英文与中文之间空格缺失检测,pangu 风格)",
         "R-TONE-02(否定句否定词置顶,检测'请不要'/'请勿')",
         "R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)",
       ],
