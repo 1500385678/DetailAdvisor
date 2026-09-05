@@ -1,7 +1,7 @@
-# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 5 零依赖规则 + 增量 R-TYPO-06
+# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 5 零依赖规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07
 
-> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 三次增量 · 2026-09-05
-> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02 / 0904 T5 增量 v0.1 错别字 3 条 + v0.3 语气 2 条 / 0905 T5 增量 R-TYPO-06
+> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 四次增量 · 2026-09-06
+> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02 / 0904 T5 增量 v0.1 错别字 3 条 + v0.3 语气 2 条 / 0905 T5 增量 R-TYPO-06 / 0906 T5 增量 R-TYPO-07
 > 入口: `app/api/audit/text/route.ts`(Next.js 16 App Router Route Handler)
 
 ---
@@ -10,10 +10,10 @@
 
 | 项 | 说明 |
 |---|------|
-| 当前已实现 | **8 条规则**(均纯机检,零外部依赖):**R-READ-01**(句长上限,0902)+ **R-READ-02**(句首连词堆叠,0903)+ **R-TYPO-02**(多字/漏字/重复字,0904)+ **R-TYPO-03**(中英文标点混用,0904)+ **R-TYPO-05**(全角/半角混用,0904)+ **R-TYPO-06**(数字/英文与中文之间空格缺失,0905)+ **R-TONE-02**(否定句否定词置顶,0904)+ **R-TONE-03**(语气一致性,0904) |
+| 当前已实现 | **9 条规则**(均纯机检,零外部依赖):**R-READ-01**(句长上限,0902)+ **R-READ-02**(句首连词堆叠,0903)+ **R-TYPO-02**(多字/漏字/重复字,0904)+ **R-TYPO-03**(中英文标点混用,0904)+ **R-TYPO-05**(全角/半角混用,0904)+ **R-TYPO-06**(数字/英文与中文之间空格缺失,0905)+ **R-TYPO-07**(连续标点符号 ≥ 3 同标点,0906)+ **R-TONE-02**(否定句否定词置顶,0904)+ **R-TONE-03**(语气一致性,0904) |
 | 暂未实现 | R-TYPO-01(同音字,需 hanlp)/ R-TYPO-04(量词,需 LLM)/ R-BRAND-01~04(品牌词,需词表,Phase 1.5)/ R-TONE-01(二义性,需 LLM)/ R-READ-03(信息密度,需 LLM) |
-| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 三次增量 commit,2 规则 → 8 规则扩展 |
-| 关联规则 | `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` §3 R-TYPO-02/03/05/06 + `docs/审查规则/v0.3_文案审查_语气_可读性.md` §3/§4 R-TONE-02/03 + R-READ-01/02 |
+| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 四次增量 commit,2 规则 → 9 规则扩展 |
+| 关联规则 | `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` §3 R-TYPO-02/03/05/06/07 + `docs/审查规则/v0.3_文案审查_语气_可读性.md` §3/§4 R-TONE-02/03 + R-READ-01/02 |
 
 ## 2. 接口
 
@@ -111,6 +111,17 @@ Content-Type: application/json
       "direction": "cjk-ascii" | "ascii-cjk"  // 中文在前/在后
     }
   ],
+  "typo07_hits": [                    // R-TYPO-07 命中项数组(0906 增量)
+    {
+      "rule": "R-TYPO-07",
+      "text": string,                 // 命中的连续标点片段(如"。。。" / "???" / "!!!")
+      "position": number,             // 字符偏移(连续段起点)
+      "match": string,                // 完整连续标点
+      "run_length": number,           // 连续标点数量(≥ 3)
+      "punct": string,                // 单个标点字符
+      "punct_type": "cjk" | "latin"   // 中英标点分类
+    }
+  ],
   "tone02_hits": [                    // R-TONE-02 命中项数组(0904 增量)
     {
       "rule": "R-TONE-02",
@@ -133,11 +144,11 @@ Content-Type: application/json
       "threshold": 0.7                // 阈值
     }
   ],
-  "summary": string,                  // 一句话总结(8 规则分号分隔)
+  "summary": string,                  // 一句话总结(9 规则分号分隔)
   "meta": {
     "rules_evaluated": [
       "R-READ-01", "R-READ-02",
-      "R-TYPO-02", "R-TYPO-03", "R-TYPO-05", "R-TYPO-06",
+      "R-TYPO-02", "R-TYPO-03", "R-TYPO-05", "R-TYPO-06", "R-TYPO-07",
       "R-TONE-02", "R-TONE-03"
     ],
     "rules_skipped": [...],           // 暂未实现的规则列表
@@ -269,6 +280,47 @@ score = min(命中处数, 3)
 | 5个名额 | ✅ 命中 1 处("5个") | 5 个名额 |
 | 剩余次数 1 次 | ❌ 不命中(已留空格) | (无需改) |
 | abc123 是合法字符串 | ❌ 不命中(纯 ASCII 内部) | (无需改) |
+
+### 3.7 R-TYPO-07 连续标点符号(0906 增量)
+
+#### 规则定义
+
+> 同一标点(中英任一)连续出现 ≥ 3 次时报错;常见触发:手滑多按、语气过激。
+
+#### 检测算法
+
+```
+单一 regex,带 global flag + 后行引用:
+  REPEAT_PUNCT_RE: /([.!?。！？])\1{2,}/g
+  说明:([punct])\1{2,} 表示"同一字符连续 ≥ 3 次";覆盖 6 种标点
+  区分 cjk/latin(unicode 范围 0x3000-0x303F / 0xFF01-0xFF60 判 cjk)
+```
+
+#### 关键设计点
+
+- **后行引用**:`(.)\1{2,}` 强制要求"同一字符",不会跨字符误报
+- **覆盖 6 种标点**:。/！/？/./!/?(中英各 3,共 6)
+- **不豁免**:连续 3+ 标点几乎一定是手滑/语气过激,无需白名单
+- **run_length 上报**:不只报"命中",还告诉用户"几连",便于客户端提示
+
+#### 扣分公式
+
+```
+score = min(命中段数, 3)
+```
+
+- 每命中 1 段扣 1 分(R-TYPO-07 单条上限 3 分,与 TYPO-02/03/05/06 持平)
+- 总扣分 = `min(Σ 9 规则扣分, 5)`
+- verdict 映射:0 分 → PASS, ≥1 分 → SOFT_WARN(软调,不阻塞)
+
+#### 自检示例
+
+| 原文 | R-TYPO-07 命中 | 改写 |
+|------|----------------|------|
+| 你好。。。欢迎使用 | ✅ 命中 1 段("。。。" run_length=3 cjk) | 你好。欢迎使用 |
+| 真的吗??? 你确定?! | ✅ 命中 1 段("???" run_length=3 latin) | 真的吗? 你确定?! |
+| 你确定?好的!那就这样。 | ❌ 不命中(单标点 + 不连续) | (无需改) |
+| 你好,欢迎! | ❌ 不命中(2 个同标点不连用) | (无需改) |
 
 ## 4. 验证示例
 
@@ -456,10 +508,17 @@ curl -X POST http://localhost:3000/api/audit/text \
 - [x] `npx next build` 通过(`/api/audit/text` 路由注册 + 8 规则 meta 正确)
 - [x] curl 端到端验证 5 例:启动 `npx next dev -p 4123` → **T1 GET 元信息确认 8 规则已实现**(`version: 0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06`,`rules_implemented` 第 6 项含 R-TYPO-06)→ **T2 8 规则全跑验证 meta**("资料已提交,24h 内顾问将联系您" → summary 含 8 段;R-TYPO-06 通过 0 hit)→ **T3 R-TYPO-06 双向命中**("剩余次数1次免费" → typo06_hits 2 处 "数1" + "1次" 扣 2 分;**T3 初版用单 regex matchAll 漏掉"1次",改用 2 个独立 regex 重测通过**)→ **T4 多规则累加**("已注册Ａ产品,剩余次数1次" → typo05:1 + typo06:2 + typo03:1 = 4 分)→ **T5 数字内部豁免**("abc123 是合法字符串" → typo06_hits=[] PASS)→ 关闭 dev server
 
+### 6.5 0906 T5(R-TYPO-07 增量:连续标点符号)
+
+- [x] `npx tsc --noEmit` 通过(0 errors,新 Typo07Hit 接口 + checkTypo07 函数 + REPEAT_PUNCT_RE regex + POST handler 9 规则累加 + GET 元信息 9 规则全部类型对齐)
+- [x] `npx eslint .` 通过(0 errors / 0 warnings)
+- [x] `npx next build` 通过(`/api/audit/text` 路由注册 + 9 规则 meta 正确)
+- [x] curl 端到端验证 5 例:启动 `npx next dev -p 4123` → **T1 GET 元信息确认 9 规则已实现**(`version: 0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07`,`rules_implemented` 第 7 项含 R-TYPO-07)→ **T2 PASS**("注册成功"短文案,summary 含 9 段 R-TYPO-07 通过)→ **T3 中文连续 3 句号命中**("你好。。。欢迎使用" → typo07_hits 1 段 "。。。" run_length=3 cjk 扣 1 分)→ **T4 英文连续 3 问号命中**("真的吗??? 你确定?!" → typo07_hits 1 段 "???" run_length=3 latin 扣 1 分 + R-TYPO-03 累加达 5 分上限)→ **T5 边界 — 2 个同标点不连用 PASS**("你确定?好的!那就这样。" → typo07_hits=[] 通过,只 R-TYPO-03 命中 2 分)→ 关闭 dev server
+
 ## 7. 关联文档
 
-- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(累计勾选:启动 v0.1 + R-READ-02 增量 + 5 零依赖规则增量 + R-TYPO-06 增量,共 4 个子项)
-- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子(0904 T5 落地 R-TYPO-02/03/05;0905 T5 落地 R-TYPO-06)
+- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(累计勾选:启动 v0.1 + R-READ-02 增量 + 5 零依赖规则增量 + R-TYPO-06 增量 + R-TYPO-07 增量,共 5 个子项)
+- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子(0904 T5 落地 R-TYPO-02/03/05;0905 T5 落地 R-TYPO-06;0906 T5 落地 R-TYPO-07)
 - `docs/审查规则/v0.2_文案审查_品牌词.md` v0.2 规则种子(Phase 1.5)
 - `docs/审查规则/v0.3_文案审查_语气_可读性.md` v0.3 规则种子(0904 T5 落地 R-TONE-02/03;0902-0903 已落地 R-READ-01/02)
 - `docs/a11y/axe-core_基线_v0.1.md` 0901 T5 落地
@@ -473,3 +532,4 @@ curl -X POST http://localhost:3000/api/audit/text \
 | 2026-09-03 | v0.1 API 首次增量 R-READ-02:`app/api/audit/text/route.ts` 新增 R-READ-02 检测函数(句首连词堆叠,24 词连词词典 + 8 字窗口扫描 + 白名单豁免)+ `Read02Hit` 接口 + POST handler 双规则累加 + 文档 §1/§2.3/§3.5/§4.4/§4.5/§5/§6.2/§7/§8 全部对齐;**无 plan,临时决策**(0902 起 `.plan/` 漂移模式延续,0903 巡检建议显式记录);0903 巡检"高优"项(audit-text API 雏形增量扩展)100% 兑现 | 03:30 T5 cron |
 | 2026-09-04 | v0.1 API 二次增量 5 零依赖规则(2 规则 → 7 规则):`app/api/audit/text/route.ts` 新增 R-TYPO-02(多字/漏字/重复字,叠词白名单豁免)+ R-TYPO-03(中英文标点混用)+ R-TYPO-05(全角/半角混用)+ R-TONE-02(否定句否定词置顶,检测"请不要"/"请勿")+ R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)+ 5 个新 Hit 接口 + RuleSummary 接口 + POST handler 7 规则累加(score 上限 5 分)+ GET 元信息 7 规则全部注册 + 文档 §1/§2.3/§5/§6.3/§7/§8 全部对齐;**无 plan,临时决策**(0902-0903 漂移模式第 3 天延续,0904 巡检 2 条"最高优"项兑现);**Phase 1 §6 模块 1 从 2 规则扩到 7 规则,代码资产 0.2 → 0.3 起步**;同步兑现 0904 巡检"高优"项 D — `README.md` 增补"无 plan,临时决策"约定 | 03:30 T5 cron |
 | 2026-09-05 | v0.1 API 三次增量 R-TYPO-06 数字/英文与中文之间空格缺失(pangu 风格,7 → 8 规则):`app/api/audit/text/route.ts` 新增 `Typo06Hit` 接口 + `checkTypo06` 函数(**2 个独立 regex** PANGU_CJK_ASCII_RE / PANGU_ASCII_CJK_RE 双向独立扫描 + 合并后 position 升序;**初版用单 regex matchAll 漏掉"1次"已修复**)+ POST handler 8 规则累加(score 上限 5 分)+ GET 元信息 8 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06` + 文档 §1/§2.3/§3.6/§6.4/§7/§8 全部对齐 + `.plan/20260905.md` 临时决策依据留痕;**无 plan,临时决策**(0902-0903-0904 漂移模式第 4 天延续,0829 起 `.plan/` 漂移模式已稳定 7 天;**0825-0905 共 12 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 7 规则扩到 8 规则,代码资产 0.3 → 0.4 起步** | 03:30 T5 cron |
+| 2026-09-06 | v0.1 API 四次增量 R-TYPO-07 连续标点符号(8 → 9 规则):`app/api/audit/text/route.ts` 新增 `Typo07Hit` 接口(7 字段:rule/text/position/match/run_length/punct/punct_type)+ `checkTypo07` 函数(**1 个 regex** REPEAT_PUNCT_RE `/([.!?。！？])\1{2,}/g` 后行引用扫"≥ 3 同标点连用" + cjk/latin 分类用 unicode 范围 0x3000-0x303F / 0xFF01-0xFF60)+ POST handler 9 规则累加(score 上限 5 分)+ GET 元信息 9 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07` + 文档 §1/§2.3/§3.7/§6.5/§7/§8 全部对齐;**无 plan,临时决策**(0902-0903-0904-0905 漂移模式第 5 天延续,0829 起 `.plan/` 漂移模式已稳定 8 天;**0825-0906 共 13 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 8 规则扩到 9 规则,代码资产 0.4 → 0.5 起步**;R-TYPO-07 选型:零依赖纯 regex + 后行引用,6 标点(中英各 3)覆盖,无白名单(连续 3+ 几乎一定是手滑/语气过激),run_length 上报便于客户端提示 | 03:30 T5 cron |

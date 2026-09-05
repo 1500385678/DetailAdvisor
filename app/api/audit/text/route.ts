@@ -1,7 +1,7 @@
 /**
- * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06
+ * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07
  *
- * Phase 1 §6 模块 1"上线文案审查器"启动 + 4 次增量
+ * Phase 1 §6 模块 1"上线文案审查器"启动 + 5 次增量
  * - 2026-09-02 T5 03:30:启动 commit,落 R-READ-01 句长上限
  * - 2026-09-03 T5 03:30:增量 R-READ-02 句首连词堆叠(零依赖,纯机检)
  * - 2026-09-04 T5 03:30:增量 v0.1 错别字 3 条 + v0.3 语气可读性 2 条(零依赖纯机检)
@@ -11,14 +11,16 @@
  *   - R-TONE-02 否定句否定词置顶
  *   - R-TONE-03 语气一致性
  * - 2026-09-05 T5 03:30:增量 R-TYPO-06 数字/英文与中文之间空格缺失(零依赖纯机检,7 → 8 规则)
+ * - 2026-09-06 T5 03:30:增量 R-TYPO-07 连续标点符号(零依赖纯 regex,8 → 9 规则)
  *
- * 当前已实现 8 条规则(均纯机检,零外部依赖):
+ * 当前已实现 9 条规则(均纯机检,零外部依赖):
  * - R-READ-01 句长上限(移动端 28 / 桌面端 40)
  * - R-READ-02 句首连词堆叠(≥2 个连词连用)
  * - R-TYPO-02 多字/漏字/重复字
  * - R-TYPO-03 中英文标点混用
  * - R-TYPO-05 全角/半角混用
  * - R-TYPO-06 数字/英文与中文之间空格缺失(pangu 风格)
+ * - R-TYPO-07 连续标点符号(≥3 个同标点连用)
  * - R-TONE-02 "请不要"/"请勿" 引导句式
  * - R-TONE-03 4 类语气词频次一致性
  *
@@ -106,6 +108,16 @@ interface Typo06Hit {
   direction: "cjk-ascii" | "ascii-cjk";  // 中文在前还是在后
 }
 
+interface Typo07Hit {
+  rule: "R-TYPO-07";
+  text: string;            // 命中的连续标点片段(如 "。。。" / "？？？" / "!!!")
+  position: number;         // 字符偏移(连续段起点)
+  match: string;            // 完整连续标点
+  run_length: number;       // 连续标点数量(≥ 3)
+  punct: string;            // 单个标点字符(如 "。" / "?" / "!")
+  punct_type: "cjk" | "latin"; // 中英标点分类
+}
+
 interface Tone02Hit {
   rule: "R-TONE-02";
   sentence: string;
@@ -130,6 +142,7 @@ interface AuditResponse {
   typo03_hits: Typo03Hit[];
   typo05_hits: Typo05Hit[];
   typo06_hits: Typo06Hit[];
+  typo07_hits: Typo07Hit[];
   tone02_hits: Tone02Hit[];
   tone03_hits: Tone03Hit[];
   summary: string;
@@ -176,6 +189,7 @@ const TYPO05_MAX = 3;
 const TONE02_MAX = 2;
 const TONE03_MAX = 2;
 const TYPO06_MAX = 3;
+const TYPO07_MAX = 3;
 
 /**
  * 按标点切分文本为句子(保留原顺序,过滤空字符串)
@@ -573,6 +587,59 @@ function checkTypo06(text: string): { hits: Typo06Hit[]; score: number } {
 }
 
 // ============================================================
+// R-TYPO-07 实现(纯 regex,无外部依赖)
+// 规则:同一标点连续出现 ≥ 3 次时报
+//   - 中文标点:。。、！！、？？
+//   - 英文标点:...、!!!、???
+// 阈值:每命中 1 处 1 分,单条上限 3 分
+// 白名单:不豁免(连续 3+ 标点 = 几乎一定是手滑/语气过激,需要报警)
+// ============================================================
+
+/**
+ * 连续标点 regex
+ * - 后行引用:([.!?。！？])\1{2,} 表示"同一标点连续 ≥ 3 次"
+ * - 用 global flag + matchAll 扫所有连续段
+ * - 不做"建议替换为 1 个标点"提示,只报 hit
+ */
+const REPEAT_PUNCT_RE = /([.!?。！？])\1{2,}/g;
+
+/**
+ * R-TYPO-07 连续标点符号检测
+ * - 扫所有"≥ 3 个同标点连用"段
+ * - 区分中英标点(cjk/latin)
+ * - 输出每个连续段的位置、长度、标点类型
+ */
+function checkTypo07(text: string): { hits: Typo07Hit[]; score: number } {
+  const hits: Typo07Hit[] = [];
+  let score = 0;
+
+  for (const m of text.matchAll(REPEAT_PUNCT_RE)) {
+    const match = m[0];
+    const position = m.index ?? 0;
+    const punct = m[1] ?? match[0] ?? "";
+    // 中英标点分类:unicode 范围判断
+    const code = punct.charCodeAt(0);
+    // CJK 标点范围:0x3000-0x303F(CJK 符号和标点)/ 0xFF01-0xFF0E(全角 ASCII)
+    const punct_type: "cjk" | "latin" =
+      (code >= 0x3000 && code <= 0x303f) || (code >= 0xff01 && code <= 0xff60)
+        ? "cjk"
+        : "latin";
+    hits.push({
+      rule: "R-TYPO-07",
+      text: match,
+      position,
+      match,
+      run_length: match.length,
+      punct,
+      punct_type,
+    });
+    score = Math.min(score + 1, TYPO07_MAX);
+  }
+
+  return { hits, score };
+}
+
+// ============================================================
 // R-TONE-02 实现(纯 regex,无外部依赖)
 // 规则:否定句否定词应紧贴动词/被修饰语,避免"请不要" / "请勿" 引导
 // 阈值:命中即报(warn 级,只提示不强制)
@@ -726,13 +793,16 @@ export async function POST(request: Request) {
   // R-TYPO-06 检测(数字/英文与中文之间空格缺失)
   const { hits: typo06Hits, score: typo06Score } = checkTypo06(body.text);
 
+  // R-TYPO-07 检测(连续标点符号)
+  const { hits: typo07Hits, score: typo07Score } = checkTypo07(body.text);
+
   // R-TONE-02 检测(否定句否定词置顶)
   const { hits: tone02Hits, score: tone02Score } = checkTone02(body.text);
 
   // R-TONE-03 检测(语气一致性)
   const { hits: tone03Hits, score: tone03Score } = checkTone03(body.text);
 
-  // 总扣分(8 规则累加,单条上限 5 分)
+  // 总扣分(9 规则累加,单条上限 5 分)
   const totalScore = Math.min(
     read01Score +
       read02Score +
@@ -740,6 +810,7 @@ export async function POST(request: Request) {
       typo03Score +
       typo05Score +
       typo06Score +
+      typo07Score +
       tone02Score +
       tone03Score,
     MAX_DEDUCTION,
@@ -758,6 +829,7 @@ export async function POST(request: Request) {
     typo03_hits: typo03Hits,
     typo05_hits: typo05Hits,
     typo06_hits: typo06Hits,
+    typo07_hits: typo07Hits,
     tone02_hits: tone02Hits,
     tone03_hits: tone03Hits,
     summary: buildSummary({
@@ -767,6 +839,7 @@ export async function POST(request: Request) {
       typo03: { hits: typo03Hits, score: typo03Score },
       typo05: { hits: typo05Hits, score: typo05Score },
       typo06: { hits: typo06Hits, score: typo06Score },
+      typo07: { hits: typo07Hits, score: typo07Score },
       tone02: { hits: tone02Hits, score: tone02Score },
       tone03: { hits: tone03Hits, score: tone03Score },
     }),
@@ -778,6 +851,7 @@ export async function POST(request: Request) {
         "R-TYPO-03",
         "R-TYPO-05",
         "R-TYPO-06",
+        "R-TYPO-07",
         "R-TONE-02",
         "R-TONE-03",
       ],
@@ -803,11 +877,12 @@ interface RuleSummary {
   typo03: { hits: Typo03Hit[]; score: number };
   typo05: { hits: Typo05Hit[]; score: number };
   typo06: { hits: Typo06Hit[]; score: number };
+  typo07: { hits: Typo07Hit[]; score: number };
   tone02: { hits: Tone02Hit[]; score: number };
   tone03: { hits: Tone03Hit[]; score: number };
 }
 
-/** 拼装 summary(支持 7 规则各自命中) */
+/** 拼装 summary(支持 9 规则各自命中) */
 function buildSummary(s: RuleSummary): string {
   const parts: string[] = [];
   // R-READ-01
@@ -846,6 +921,12 @@ function buildSummary(s: RuleSummary): string {
   } else {
     parts.push(`R-TYPO-06 命中 ${s.typo06.hits.length} 处紧贴,扣 ${s.typo06.score} 分`);
   }
+  // R-TYPO-07
+  if (s.typo07.hits.length === 0) {
+    parts.push(`R-TYPO-07 通过(无连续 3+ 同标点)`);
+  } else {
+    parts.push(`R-TYPO-07 命中 ${s.typo07.hits.length} 处连续标点,扣 ${s.typo07.score} 分`);
+  }
   // R-TONE-02
   if (s.tone02.hits.length === 0) {
     parts.push(`R-TONE-02 通过(无"请不要/请勿"引导)`);
@@ -867,7 +948,7 @@ export async function GET() {
   return NextResponse.json(
     {
       api: "DetailAdvisor · 文案审查",
-      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06",
+      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07",
       method: "POST",
       endpoint: "/api/audit/text",
       content_type: "application/json",
@@ -882,6 +963,7 @@ export async function GET() {
         "R-TYPO-03(中英文标点混用检测)",
         "R-TYPO-05(全角/半角混用检测)",
         "R-TYPO-06(数字/英文与中文之间空格缺失检测,pangu 风格)",
+        "R-TYPO-07(连续标点符号检测,≥3 个同标点连用)",
         "R-TONE-02(否定句否定词置顶,检测'请不要'/'请勿')",
         "R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)",
       ],
