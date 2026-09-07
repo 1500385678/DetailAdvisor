@@ -1,7 +1,7 @@
 /**
- * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07
+ * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 v0.3 二规则 R-READ-03/R-TONE-04
  *
- * Phase 1 §6 模块 1"上线文案审查器"启动 + 5 次增量
+ * Phase 1 §6 模块 1"上线文案审查器"启动 + 6 次增量
  * - 2026-09-02 T5 03:30:启动 commit,落 R-READ-01 句长上限
  * - 2026-09-03 T5 03:30:增量 R-READ-02 句首连词堆叠(零依赖,纯机检)
  * - 2026-09-04 T5 03:30:增量 v0.1 错别字 3 条 + v0.3 语气可读性 2 条(零依赖纯机检)
@@ -12,10 +12,14 @@
  *   - R-TONE-03 语气一致性
  * - 2026-09-05 T5 03:30:增量 R-TYPO-06 数字/英文与中文之间空格缺失(零依赖纯机检,7 → 8 规则)
  * - 2026-09-06 T5 03:30:增量 R-TYPO-07 连续标点符号(零依赖纯 regex,8 → 9 规则)
+ * - 2026-09-08 T5 03:30:增量 v0.3 可读性 1 条 + v0.3 语气 1 条(零依赖纯机检,9 → 11 规则,**恢复 0907 T5 首次断档后连续节奏**)
+ *   - R-READ-03 句末标点规范(陈述句以"。"或";"或","结尾,避免无标点或语气词句末)
+ *   - R-TONE-04 感叹号密度(全篇感叹号 / 句子数 > 30% 即报,避免过激文案)
  *
- * 当前已实现 9 条规则(均纯机检,零外部依赖):
+ * 当前已实现 11 条规则(均纯机检,零外部依赖):
  * - R-READ-01 句长上限(移动端 28 / 桌面端 40)
  * - R-READ-02 句首连词堆叠(≥2 个连词连用)
+ * - R-READ-03 句末标点规范(陈述句末"!"/"?"或无标点,即报)
  * - R-TYPO-02 多字/漏字/重复字
  * - R-TYPO-03 中英文标点混用
  * - R-TYPO-05 全角/半角混用
@@ -23,16 +27,17 @@
  * - R-TYPO-07 连续标点符号(≥3 个同标点连用)
  * - R-TONE-02 "请不要"/"请勿" 引导句式
  * - R-TONE-03 4 类语气词频次一致性
+ * - R-TONE-04 感叹号密度(感叹号 / 句子数 > 30%)
  *
  * 后续版本扩展:
  * - v0.1 API:R-TYPO-01 同音字(需 hanlp 字典)+ R-TYPO-04 量词(需 LLM)
  * - v0.2 API:R-BRAND-01~04 品牌词 4 条(品牌词表本身是外部依赖,Phase 0 外部依赖 0904 起降级到 Phase 1.5)
- * - v0.3 API:R-TONE-01 二义性(需 LLM 二次校验)+ R-READ-03 信息密度(需 LLM)
+ * - v0.3 API:R-TONE-01 二义性(需 LLM 二次校验)+ R-READ-03 信息密度(需 LLM);**当前 R-READ-03 已是"句末标点规范"零依赖简化版,与原 LLM 命名同 ID 但语义不同,见 §3.8**
  *
  * 关联文档:
  * - 项目开发计划.md §3 模块 1 + §6 Phase 1 MVP
- * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05/06
- * - docs/审查规则/v0.3_文案审查_语气_可读性.md §3 R-TONE-02/03
+ * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05/06/07
+ * - docs/审查规则/v0.3_文案审查_语气_可读性.md §3 R-TONE-02/03/04 + §4 R-READ-01/02/03
  * - docs/api/audit-text-v0.1.md
  */
 import { NextResponse } from "next/server";
@@ -133,11 +138,29 @@ interface Tone03Hit {
   threshold: number;
 }
 
+interface Read03Hit {
+  rule: "R-READ-03";
+  sentence: string;
+  position: number;
+  issue: "missing-punct" | "inconsistent-ending";
+  actual_ending: string; // 句末实际字符("!"/"?"/""等)
+  primary_script: "cjk" | "latin";
+}
+
+interface Tone04Hit {
+  rule: "R-TONE-04";
+  exclam_count: number;
+  sentence_count: number;
+  ratio: number;
+  threshold: number;
+}
+
 interface AuditResponse {
   verdict: "PASS" | "SOFT_WARN" | "HARD_BLOCK";
   score_deduction: number;
   read_hits: ReadHit[];
   read02_hits: Read02Hit[];
+  read03_hits: Read03Hit[];
   typo02_hits: Typo02Hit[];
   typo03_hits: Typo03Hit[];
   typo05_hits: Typo05Hit[];
@@ -145,6 +168,7 @@ interface AuditResponse {
   typo07_hits: Typo07Hit[];
   tone02_hits: Tone02Hit[];
   tone03_hits: Tone03Hit[];
+  tone04_hits: Tone04Hit[];
   summary: string;
   meta: {
     rules_evaluated: string[];
@@ -183,11 +207,13 @@ const MAX_DEDUCTION = 5;
 
 /** 各规则独立扣分上限(软调规则比硬错规则上限更小) */
 const READ02_MAX = 3;
+const READ03_MAX = 3;
 const TYPO02_MAX = 3;
 const TYPO03_MAX = 3;
 const TYPO05_MAX = 3;
 const TONE02_MAX = 2;
 const TONE03_MAX = 2;
+const TONE04_MAX = 2;
 const TYPO06_MAX = 3;
 const TYPO07_MAX = 3;
 
@@ -745,6 +771,120 @@ function checkTone03(text: string): { hits: Tone03Hit[]; score: number } {
 }
 
 // ============================================================
+// R-READ-03 实现(纯 regex,无外部依赖)
+// 规则:陈述句末不应以"!"或"?"或无标点结尾;应以"。"(中文)或"."(英文)或","/";"等分隔标点结尾
+// 注:本规则是 v0.3 §4 R-READ-03(信息密度,需 LLM)的零依赖简化版,沿用相同 ID 但语义为"句末标点规范"
+// 阈值:每命中 1 句 1 分,单条上限 3 分
+// ============================================================
+
+/** 中文陈述句末合法标点(CJK 句号/逗号/分号/冒号/顿号/省略号) */
+const CJK_STATEMENT_ENDINGS = new Set(["。", "，", "；", "：", "、", "…", "——"]);
+/** 英文陈述句末合法标点(句号/逗号/分号/冒号) */
+const LATIN_STATEMENT_ENDINGS = new Set([".", ",", ";", ":", "…"]);
+
+/**
+ * R-READ-03 句末标点规范检测
+ * - 扫每个切出的句子
+ * - 末字符若不在合法集内 → 报(inconsistent-ending)
+ * - 末字符为"!"或"?" → 报(陈述句不应语气词结尾,除非含问号/感叹号关键词)
+ * - 空句末(纯空白) → 报(missing-punct)
+ * - 白名单:末字符是"!"或"?"的句子若含疑问/感叹词("吗/呢/啊/吧/呀/啊/哦/呀/哇/哦")则视为合法(疑问/感叹句)
+ */
+function checkRead03(text: string): { hits: Read03Hit[]; score: number } {
+  const hits: Read03Hit[] = [];
+  let score = 0;
+  const hasCJK = CJK_RE.test(text);
+  const primary_script: "cjk" | "latin" = hasCJK ? "cjk" : "latin";
+  const legalEndings = hasCJK ? CJK_STATEMENT_ENDINGS : LATIN_STATEMENT_ENDINGS;
+
+  // 中文疑问/感叹句白名单(末字符"!"或"?"若含这些词则视为合法)
+  const INTERROGATIVE_PARTICLES = /[吗呢吧呀啊哦哇哎]/;
+
+  // 用独立 regex 找"句子"(含末尾标点),避免 splitSentences 剥掉标点
+  // 模式:非切句标点任意字符 + 可选 1 个切句标点;切句标点集 = [。!?！？;；]
+  const SENTENCE_WITH_ENDING_RE = /[^。！？!?;；]*[。！？!?;；]?/g;
+  for (const m of text.matchAll(SENTENCE_WITH_ENDING_RE)) {
+    const sentence = m[0];
+    if (sentence.trim().length === 0) continue;
+
+    const lastChar = sentence[sentence.length - 1];
+    const position = m.index ?? 0;
+    // 跳过纯字母数字末(无标点)—— 单独处理 missing-punct
+    if (legalEndings.has(lastChar)) continue;
+
+    // 句末为"!"或"?"(中英)
+    if (lastChar === "!" || lastChar === "?" || lastChar === "！" || lastChar === "？") {
+      // 含疑问/感叹语气词 → 合法
+      if (INTERROGATIVE_PARTICLES.test(sentence)) continue;
+      hits.push({
+        rule: "R-READ-03",
+        sentence,
+        position,
+        issue: "inconsistent-ending",
+        actual_ending: lastChar,
+        primary_script,
+      });
+      score = Math.min(score + 1, READ03_MAX);
+      continue;
+    }
+
+    // 句末为字母/数字/汉字(无标点结尾)→ missing-punct
+    if (/[a-zA-Z0-9\u4e00-\u9fff]/.test(lastChar)) {
+      hits.push({
+        rule: "R-READ-03",
+        sentence,
+        position,
+        issue: "missing-punct",
+        actual_ending: lastChar,
+        primary_script,
+      });
+      score = Math.min(score + 1, READ03_MAX);
+    }
+  }
+
+  return { hits, score };
+}
+
+// ============================================================
+// R-TONE-04 实现(纯 regex,无外部依赖)
+// 规则:全篇感叹号"!"密度检测,感叹号数 / 句子数 > 30% 即报(过激文案)
+// 注:本规则是 v0.3 §3 R-TONE-01(二义性,需 LLM)的零依赖邻居规则,命名上沿用 v0.3 习惯
+// 阈值:命中即报 1 分(只报一次,全篇级),单条上限 2 分
+// ============================================================
+
+/** 感叹号密度阈值(感叹号数 / 句子数,中文+英文"!"/"！" 都计) */
+const TONE04_THRESHOLD = 0.3;
+
+/** 感叹号扫描 regex(中英感叹号 0xFF01 0x0021) */
+const EXCLAM_RE = /[!！]/g;
+
+function checkTone04(text: string): { hits: Tone04Hit[]; score: number } {
+  const sentences = splitSentences(text).filter((s) => s.trim().length > 0);
+  const sentenceCount = sentences.length;
+  if (sentenceCount === 0) return { hits: [], score: 0 };
+
+  const exclamMatches = text.match(EXCLAM_RE);
+  const exclamCount = exclamMatches ? exclamMatches.length : 0;
+  const ratio = exclamCount / sentenceCount;
+
+  if (ratio > TONE04_THRESHOLD) {
+    return {
+      hits: [
+        {
+          rule: "R-TONE-04",
+          exclam_count: exclamCount,
+          sentence_count: sentenceCount,
+          ratio: Number(ratio.toFixed(3)),
+          threshold: TONE04_THRESHOLD,
+        },
+      ],
+      score: Math.min(1, TONE04_MAX),
+    };
+  }
+  return { hits: [], score: 0 };
+}
+
+// ============================================================
 // POST handler
 // ============================================================
 
@@ -781,6 +921,9 @@ export async function POST(request: Request) {
   // R-READ-02 检测(句首连词堆叠)
   const { hits: read02Hits, score: read02Score } = checkRead02(body.text);
 
+  // R-READ-03 检测(句末标点规范)
+  const { hits: read03Hits, score: read03Score } = checkRead03(body.text);
+
   // R-TYPO-02 检测(多字/漏字/重复字)
   const { hits: typo02Hits, score: typo02Score } = checkTypo02(body.text);
 
@@ -802,17 +945,22 @@ export async function POST(request: Request) {
   // R-TONE-03 检测(语气一致性)
   const { hits: tone03Hits, score: tone03Score } = checkTone03(body.text);
 
-  // 总扣分(9 规则累加,单条上限 5 分)
+  // R-TONE-04 检测(感叹号密度)
+  const { hits: tone04Hits, score: tone04Score } = checkTone04(body.text);
+
+  // 总扣分(11 规则累加,单条上限 5 分)
   const totalScore = Math.min(
     read01Score +
       read02Score +
+      read03Score +
       typo02Score +
       typo03Score +
       typo05Score +
       typo06Score +
       typo07Score +
       tone02Score +
-      tone03Score,
+      tone03Score +
+      tone04Score,
     MAX_DEDUCTION,
   );
 
@@ -825,6 +973,7 @@ export async function POST(request: Request) {
     score_deduction: totalScore,
     read_hits: hits,
     read02_hits: read02Hits,
+    read03_hits: read03Hits,
     typo02_hits: typo02Hits,
     typo03_hits: typo03Hits,
     typo05_hits: typo05Hits,
@@ -832,9 +981,11 @@ export async function POST(request: Request) {
     typo07_hits: typo07Hits,
     tone02_hits: tone02Hits,
     tone03_hits: tone03Hits,
+    tone04_hits: tone04Hits,
     summary: buildSummary({
       read01: { hits, score: read01Score, surface, limit },
       read02: { hits: read02Hits, score: read02Score },
+      read03: { hits: read03Hits, score: read03Score },
       typo02: { hits: typo02Hits, score: typo02Score },
       typo03: { hits: typo03Hits, score: typo03Score },
       typo05: { hits: typo05Hits, score: typo05Score },
@@ -842,11 +993,13 @@ export async function POST(request: Request) {
       typo07: { hits: typo07Hits, score: typo07Score },
       tone02: { hits: tone02Hits, score: tone02Score },
       tone03: { hits: tone03Hits, score: tone03Score },
+      tone04: { hits: tone04Hits, score: tone04Score },
     }),
     meta: {
       rules_evaluated: [
         "R-READ-01",
         "R-READ-02",
+        "R-READ-03",
         "R-TYPO-02",
         "R-TYPO-03",
         "R-TYPO-05",
@@ -854,13 +1007,14 @@ export async function POST(request: Request) {
         "R-TYPO-07",
         "R-TONE-02",
         "R-TONE-03",
+        "R-TONE-04",
       ],
       rules_skipped: [
         "R-TYPO-01(同音字,需 hanlp 字典)",
         "R-TYPO-04(量词,需 LLM 常识校验)",
         "R-BRAND-01~04(品牌词,需品牌词表,Phase 0 外部依赖,0904 起降级到 Phase 1.5)",
         "R-TONE-01(二义性,需 LLM 二次校验)",
-        "R-READ-03(信息密度,需 LLM 提取)",
+        "R-READ-03-LLM(信息密度,需 LLM 提取,0908 已落零依赖'句末标点规范'同名规则)",
       ],
       scene_resolved: scene,
       text_length: unicodeLength(body.text),
@@ -873,6 +1027,7 @@ export async function POST(request: Request) {
 interface RuleSummary {
   read01: { hits: ReadHit[]; score: number; surface: "mobile" | "desktop"; limit: number };
   read02: { hits: Read02Hit[]; score: number };
+  read03: { hits: Read03Hit[]; score: number };
   typo02: { hits: Typo02Hit[]; score: number };
   typo03: { hits: Typo03Hit[]; score: number };
   typo05: { hits: Typo05Hit[]; score: number };
@@ -880,9 +1035,10 @@ interface RuleSummary {
   typo07: { hits: Typo07Hit[]; score: number };
   tone02: { hits: Tone02Hit[]; score: number };
   tone03: { hits: Tone03Hit[]; score: number };
+  tone04: { hits: Tone04Hit[]; score: number };
 }
 
-/** 拼装 summary(支持 9 规则各自命中) */
+/** 拼装 summary(支持 11 规则各自命中) */
 function buildSummary(s: RuleSummary): string {
   const parts: string[] = [];
   // R-READ-01
@@ -896,6 +1052,12 @@ function buildSummary(s: RuleSummary): string {
     parts.push(`R-READ-02 通过(无句首连词堆叠)`);
   } else {
     parts.push(`R-READ-02 命中 ${s.read02.hits.length} 个堆叠句,扣 ${s.read02.score} 分`);
+  }
+  // R-READ-03
+  if (s.read03.hits.length === 0) {
+    parts.push(`R-READ-03 通过(句末标点规范)`);
+  } else {
+    parts.push(`R-READ-03 命中 ${s.read03.hits.length} 句不规范,扣 ${s.read03.score} 分`);
   }
   // R-TYPO-02
   if (s.typo02.hits.length === 0) {
@@ -940,6 +1102,13 @@ function buildSummary(s: RuleSummary): string {
     const hit = s.tone03.hits[0];
     parts.push(`R-TONE-03 命中(主语气词"${hit.dominant}"仅占 ${(hit.dominant_ratio * 100).toFixed(1)}%),扣 ${s.tone03.score} 分`);
   }
+  // R-TONE-04
+  if (s.tone04.hits.length === 0) {
+    parts.push(`R-TONE-04 通过(感叹号密度合理)`);
+  } else {
+    const hit = s.tone04.hits[0];
+    parts.push(`R-TONE-04 命中(感叹号 ${hit.exclam_count} 个 / ${hit.sentence_count} 句 = ${(hit.ratio * 100).toFixed(1)}% > ${(hit.threshold * 100).toFixed(0)}%),扣 ${s.tone04.score} 分`);
+  }
   return parts.join(";");
 }
 
@@ -948,7 +1117,7 @@ export async function GET() {
   return NextResponse.json(
     {
       api: "DetailAdvisor · 文案审查",
-      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07",
+      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04",
       method: "POST",
       endpoint: "/api/audit/text",
       content_type: "application/json",
@@ -959,6 +1128,7 @@ export async function GET() {
       rules_implemented: [
         "R-READ-01(句长上限,移动端 28 / 桌面端 40)",
         "R-READ-02(句首连词堆叠,≥2 个连词连用)",
+        "R-READ-03(句末标点规范,陈述句末'!'或'?'或无标点,即报)",
         "R-TYPO-02(多字/漏字/重复字,叠词白名单豁免)",
         "R-TYPO-03(中英文标点混用检测)",
         "R-TYPO-05(全角/半角混用检测)",
@@ -966,13 +1136,14 @@ export async function GET() {
         "R-TYPO-07(连续标点符号检测,≥3 个同标点连用)",
         "R-TONE-02(否定句否定词置顶,检测'请不要'/'请勿')",
         "R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)",
+        "R-TONE-04(感叹号密度检测,感叹号数/句子数 > 30% 即报)",
       ],
       rules_skipped: [
         "R-TYPO-01(同音字,需 hanlp 字典)",
         "R-TYPO-04(量词,需 LLM)",
         "R-BRAND-01~04(品牌词,需品牌词表,Phase 1.5)",
         "R-TONE-01(二义性,需 LLM)",
-        "R-READ-03(信息密度,需 LLM)",
+        "R-READ-03-LLM(信息密度,需 LLM 提取,0908 已落零依赖'句末标点规范'同名规则)",
       ],
       docs: "docs/api/audit-text-v0.1.md",
     },
