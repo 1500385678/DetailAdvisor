@@ -155,6 +155,14 @@ interface Tone04Hit {
   threshold: number;
 }
 
+interface Typo08Hit {
+  rule: "R-TYPO-08";
+  text: string; // 命中的极限词(如"最佳")
+  position: number; // 字符偏移
+  match: string; // 完整匹配(同 text,便于客户端差异化处理)
+  category: "absolute" | "ranking" | "degree" | "promise"; // 极限词分类
+}
+
 interface AuditResponse {
   verdict: "PASS" | "SOFT_WARN" | "HARD_BLOCK";
   score_deduction: number;
@@ -166,6 +174,7 @@ interface AuditResponse {
   typo05_hits: Typo05Hit[];
   typo06_hits: Typo06Hit[];
   typo07_hits: Typo07Hit[];
+  typo08_hits: Typo08Hit[];
   tone02_hits: Tone02Hit[];
   tone03_hits: Tone03Hit[];
   tone04_hits: Tone04Hit[];
@@ -216,6 +225,7 @@ const TONE03_MAX = 2;
 const TONE04_MAX = 2;
 const TYPO06_MAX = 3;
 const TYPO07_MAX = 3;
+const TYPO08_MAX = 3;
 
 /**
  * 按标点切分文本为句子(保留原顺序,过滤空字符串)
@@ -885,6 +895,99 @@ function checkTone04(text: string): { hits: Tone04Hit[]; score: number } {
 }
 
 // ============================================================
+// R-TYPO-08 实现(广告法极限词零依赖查表)
+// ============================================================
+
+/** 广告法极限词词表(精选 33 条)
+ *  分类:
+ *    - absolute: 绝对化用词(广告法第九条明令禁止)
+ *    - ranking:  排名/地位类(暗示行业地位)
+ *    - degree:   程度极限(100%/永远/完美等)
+ *    - promise:  承诺/保证类(包过/稳赚/无副作用等)
+ *  选型:零依赖纯静态词表 + 2+ 字词(避免单字"最"/"全"误报);
+ *       长词优先匹配防"最好"/"最好吃"重复报(详见 checkTypo08 实现)
+ */
+const ABSOLUTE_WORDS: ReadonlyArray<{ word: string; category: Typo08Hit["category"] }> = [
+  // 绝对化(8)
+  { word: "最佳", category: "absolute" },
+  { word: "最好", category: "absolute" },
+  { word: "最大", category: "absolute" },
+  { word: "最高", category: "absolute" },
+  { word: "最优", category: "absolute" },
+  { word: "最强", category: "absolute" },
+  { word: "最快", category: "absolute" },
+  { word: "最便宜", category: "absolute" },
+  // 排名/地位(9)
+  { word: "第一", category: "ranking" },
+  { word: "唯一", category: "ranking" },
+  { word: "首选", category: "ranking" },
+  { word: "独家", category: "ranking" },
+  { word: "顶级", category: "ranking" },
+  { word: "顶尖", category: "ranking" },
+  { word: "最高级", category: "ranking" },
+  { word: "国家级", category: "ranking" },
+  { word: "世界级", category: "ranking" },
+  // 程度极限(9)
+  { word: "100%", category: "degree" },
+  { word: "百分百", category: "degree" },
+  { word: "百分之百", category: "degree" },
+  { word: "永久", category: "degree" },
+  { word: "永远", category: "degree" },
+  { word: "绝对", category: "degree" },
+  { word: "完全", category: "degree" },
+  { word: "完美", category: "degree" },
+  { word: "万能", category: "degree" },
+  // 承诺/保证(7)
+  { word: "包过", category: "promise" },
+  { word: "稳赚", category: "promise" },
+  { word: "零风险", category: "promise" },
+  { word: "无风险", category: "promise" },
+  { word: "稳赚不赔", category: "promise" },
+  { word: "无副作用", category: "promise" },
+  { word: "立竿见影", category: "promise" },
+];
+
+function checkTypo08(text: string): { hits: Typo08Hit[]; score: number } {
+  if (text.length === 0) return { hits: [], score: 0 };
+  const hits: Typo08Hit[] = [];
+  // 按 word.length 降序:长词优先匹配,避免"最佳"被拆为"最"+"佳"重复报
+  const sorted = [...ABSOLUTE_WORDS].sort((a, b) => b.word.length - a.word.length);
+  // 用 Set 跟踪已覆盖区间 [start, end),避免子串重复报
+  const covered: Array<[number, number]> = [];
+  const isCovered = (start: number, end: number): boolean => {
+    for (const [s, e] of covered) {
+      if (s <= start && end <= e) return true;
+    }
+    return false;
+  };
+
+  for (const { word, category } of sorted) {
+    let pos = 0;
+    while (pos <= text.length - word.length) {
+      const idx = text.indexOf(word, pos);
+      if (idx === -1) break;
+      const end = idx + word.length;
+      if (!isCovered(idx, end)) {
+        hits.push({
+          rule: "R-TYPO-08",
+          text: word,
+          position: idx,
+          match: word,
+          category,
+        });
+        covered.push([idx, end]);
+      }
+      pos = idx + word.length;
+    }
+  }
+
+  // 按 position 升序输出
+  hits.sort((a, b) => a.position - b.position);
+  const score = Math.min(hits.length, TYPO08_MAX);
+  return { hits, score };
+}
+
+// ============================================================
 // POST handler
 // ============================================================
 
@@ -939,6 +1042,9 @@ export async function POST(request: Request) {
   // R-TYPO-07 检测(连续标点符号)
   const { hits: typo07Hits, score: typo07Score } = checkTypo07(body.text);
 
+  // R-TYPO-08 检测(广告法极限词零依赖查表)
+  const { hits: typo08Hits, score: typo08Score } = checkTypo08(body.text);
+
   // R-TONE-02 检测(否定句否定词置顶)
   const { hits: tone02Hits, score: tone02Score } = checkTone02(body.text);
 
@@ -948,7 +1054,7 @@ export async function POST(request: Request) {
   // R-TONE-04 检测(感叹号密度)
   const { hits: tone04Hits, score: tone04Score } = checkTone04(body.text);
 
-  // 总扣分(11 规则累加,单条上限 5 分)
+  // 总扣分(12 规则累加,单条上限 5 分)
   const totalScore = Math.min(
     read01Score +
       read02Score +
@@ -958,6 +1064,7 @@ export async function POST(request: Request) {
       typo05Score +
       typo06Score +
       typo07Score +
+      typo08Score +
       tone02Score +
       tone03Score +
       tone04Score,
@@ -979,6 +1086,7 @@ export async function POST(request: Request) {
     typo05_hits: typo05Hits,
     typo06_hits: typo06Hits,
     typo07_hits: typo07Hits,
+    typo08_hits: typo08Hits,
     tone02_hits: tone02Hits,
     tone03_hits: tone03Hits,
     tone04_hits: tone04Hits,
@@ -991,6 +1099,7 @@ export async function POST(request: Request) {
       typo05: { hits: typo05Hits, score: typo05Score },
       typo06: { hits: typo06Hits, score: typo06Score },
       typo07: { hits: typo07Hits, score: typo07Score },
+      typo08: { hits: typo08Hits, score: typo08Score },
       tone02: { hits: tone02Hits, score: tone02Score },
       tone03: { hits: tone03Hits, score: tone03Score },
       tone04: { hits: tone04Hits, score: tone04Score },
@@ -1005,6 +1114,7 @@ export async function POST(request: Request) {
         "R-TYPO-05",
         "R-TYPO-06",
         "R-TYPO-07",
+        "R-TYPO-08",
         "R-TONE-02",
         "R-TONE-03",
         "R-TONE-04",
@@ -1033,12 +1143,13 @@ interface RuleSummary {
   typo05: { hits: Typo05Hit[]; score: number };
   typo06: { hits: Typo06Hit[]; score: number };
   typo07: { hits: Typo07Hit[]; score: number };
+  typo08: { hits: Typo08Hit[]; score: number };
   tone02: { hits: Tone02Hit[]; score: number };
   tone03: { hits: Tone03Hit[]; score: number };
   tone04: { hits: Tone04Hit[]; score: number };
 }
 
-/** 拼装 summary(支持 11 规则各自命中) */
+/** 拼装 summary(支持 12 规则各自命中) */
 function buildSummary(s: RuleSummary): string {
   const parts: string[] = [];
   // R-READ-01
@@ -1089,6 +1200,12 @@ function buildSummary(s: RuleSummary): string {
   } else {
     parts.push(`R-TYPO-07 命中 ${s.typo07.hits.length} 处连续标点,扣 ${s.typo07.score} 分`);
   }
+  // R-TYPO-08
+  if (s.typo08.hits.length === 0) {
+    parts.push(`R-TYPO-08 通过(无广告法极限词)`);
+  } else {
+    parts.push(`R-TYPO-08 命中 ${s.typo08.hits.length} 处极限词,扣 ${s.typo08.score} 分`);
+  }
   // R-TONE-02
   if (s.tone02.hits.length === 0) {
     parts.push(`R-TONE-02 通过(无"请不要/请勿"引导)`);
@@ -1117,7 +1234,7 @@ export async function GET() {
   return NextResponse.json(
     {
       api: "DetailAdvisor · 文案审查",
-      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04",
+      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08",
       method: "POST",
       endpoint: "/api/audit/text",
       content_type: "application/json",
@@ -1134,6 +1251,7 @@ export async function GET() {
         "R-TYPO-05(全角/半角混用检测)",
         "R-TYPO-06(数字/英文与中文之间空格缺失检测,pangu 风格)",
         "R-TYPO-07(连续标点符号检测,≥3 个同标点连用)",
+        "R-TYPO-08(广告法极限词零依赖查表,33 条词表 4 类分类)",
         "R-TONE-02(否定句否定词置顶,检测'请不要'/'请勿')",
         "R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)",
         "R-TONE-04(感叹号密度检测,感叹号数/句子数 > 30% 即报)",

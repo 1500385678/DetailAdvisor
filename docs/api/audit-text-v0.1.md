@@ -1,7 +1,7 @@
-# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 5 零依赖规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07
+# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 5 零依赖规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 R-READ-03 + R-TONE-04 + 增量 R-TYPO-08
 
-> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 四次增量 · 2026-09-06
-> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02 / 0904 T5 增量 v0.1 错别字 3 条 + v0.3 语气 2 条 / 0905 T5 增量 R-TYPO-06 / 0906 T5 增量 R-TYPO-07
+> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 六次增量 · 2026-09-09
+> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02 / 0904 T5 增量 v0.1 错别字 3 条 + v0.3 语气 2 条 / 0905 T5 增量 R-TYPO-06 / 0906 T5 增量 R-TYPO-07 / 0908 T5 增量 R-READ-03 + R-TONE-04 / 0909 T5 增量 R-TYPO-08
 > 入口: `app/api/audit/text/route.ts`(Next.js 16 App Router Route Handler)
 
 ---
@@ -10,10 +10,10 @@
 
 | 项 | 说明 |
 |---|------|
-| 当前已实现 | **9 条规则**(均纯机检,零外部依赖):**R-READ-01**(句长上限,0902)+ **R-READ-02**(句首连词堆叠,0903)+ **R-TYPO-02**(多字/漏字/重复字,0904)+ **R-TYPO-03**(中英文标点混用,0904)+ **R-TYPO-05**(全角/半角混用,0904)+ **R-TYPO-06**(数字/英文与中文之间空格缺失,0905)+ **R-TYPO-07**(连续标点符号 ≥ 3 同标点,0906)+ **R-TONE-02**(否定句否定词置顶,0904)+ **R-TONE-03**(语气一致性,0904) |
-| 暂未实现 | R-TYPO-01(同音字,需 hanlp)/ R-TYPO-04(量词,需 LLM)/ R-BRAND-01~04(品牌词,需词表,Phase 1.5)/ R-TONE-01(二义性,需 LLM)/ R-READ-03(信息密度,需 LLM) |
-| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 四次增量 commit,2 规则 → 9 规则扩展 |
-| 关联规则 | `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` §3 R-TYPO-02/03/05/06/07 + `docs/审查规则/v0.3_文案审查_语气_可读性.md` §3/§4 R-TONE-02/03 + R-READ-01/02 |
+| 当前已实现 | **12 条规则**(均纯机检,零外部依赖):**R-READ-01**(句长上限,0902)+ **R-READ-02**(句首连词堆叠,0903)+ **R-READ-03**(句末标点规范,0908)+ **R-TYPO-02**(多字/漏字/重复字,0904)+ **R-TYPO-03**(中英文标点混用,0904)+ **R-TYPO-05**(全角/半角混用,0904)+ **R-TYPO-06**(数字/英文与中文之间空格缺失,0905)+ **R-TYPO-07**(连续标点符号 ≥ 3 同标点,0906)+ **R-TYPO-08**(广告法极限词零依赖查表 33 条 4 类,0909)+ **R-TONE-02**(否定句否定词置顶,0904)+ **R-TONE-03**(语气一致性,0904)+ **R-TONE-04**(感叹号密度,0908) |
+| 暂未实现 | R-TYPO-01(同音字,需 hanlp)/ R-TYPO-04(量词,需 LLM)/ R-BRAND-01~04(品牌词,需词表,Phase 1.5)/ R-TONE-01(二义性,需 LLM)/ R-READ-03-LLM(信息密度,需 LLM,0908 已落零依赖"句末标点规范"同名规则) |
+| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 六次增量 commit,2 规则 → 12 规则扩展,代码资产 0 → 0.7 起步 |
+| 关联规则 | `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` §3 R-TYPO-02/03/05/06/07/08 + `docs/审查规则/v0.3_文案审查_语气_可读性.md` §3/§4 R-TONE-02/03/04 + R-READ-01/02/03 |
 
 ## 2. 接口
 
@@ -52,7 +52,7 @@ Content-Type: application/json
 ```typescript
 {
   "verdict": "PASS" | "SOFT_WARN",   // 本 API 雏形无 HARD_BLOCK
-  "score_deduction": number,          // 0 ~ 5(单条文案上限 5 分,7 规则累加)
+  "score_deduction": number,          // 0 ~ 5(单条文案上限 5 分,12 规则累加)
   "read_hits": [                      // R-READ-01 命中项数组
     {
       "rule": "R-READ-01",
@@ -122,6 +122,15 @@ Content-Type: application/json
       "punct_type": "cjk" | "latin"   // 中英标点分类
     }
   ],
+  "typo08_hits": [                    // R-TYPO-08 命中项数组(0909 增量)
+    {
+      "rule": "R-TYPO-08",
+      "text": string,                 // 命中的极限词(如"最佳" / "稳赚不赔" / "100%")
+      "position": number,             // 字符偏移
+      "match": string,                // 完整匹配(同 text,便于客户端差异化处理)
+      "category": "absolute" | "ranking" | "degree" | "promise"  // 极限词分类
+    }
+  ],
   "tone02_hits": [                    // R-TONE-02 命中项数组(0904 增量)
     {
       "rule": "R-TONE-02",
@@ -144,12 +153,12 @@ Content-Type: application/json
       "threshold": 0.7                // 阈值
     }
   ],
-  "summary": string,                  // 一句话总结(9 规则分号分隔)
+  "summary": string,                  // 一句话总结(12 规则分号分隔)
   "meta": {
     "rules_evaluated": [
-      "R-READ-01", "R-READ-02",
-      "R-TYPO-02", "R-TYPO-03", "R-TYPO-05", "R-TYPO-06", "R-TYPO-07",
-      "R-TONE-02", "R-TONE-03"
+      "R-READ-01", "R-READ-02", "R-READ-03",
+      "R-TYPO-02", "R-TYPO-03", "R-TYPO-05", "R-TYPO-06", "R-TYPO-07", "R-TYPO-08",
+      "R-TONE-02", "R-TONE-03", "R-TONE-04"
     ],
     "rules_skipped": [...],           // 暂未实现的规则列表
     "scene_resolved": Scene,
@@ -415,6 +424,63 @@ score = min(1, 2)
 | 新功能已上线。请立即体验。 | ❌ 不命中(0 感叹号 / 2 句) | (无需改) |
 | 新功能已上线!请立即体验!! | ✅ 命中(2 感叹号 / 2 句 = 100%) + R-TYPO-07 命中 1 段 | 新功能已上线!请立即体验。 |
 
+### 3.10 R-TYPO-08 广告法极限词零依赖查表(0909 增量,12 规则收口)
+
+#### 规则定义
+
+> 命中《广告法》第九条"极限词"禁令或行业承诺类用词时报警,提示"广告合规风险";33 条精选词表分 4 类(absolute / ranking / degree / promise)。
+> **命名空间说明**: R-TYPO-08 编号沿用 TYPO 序列,但主题与 R-TYPO-01~07 略有差异(属"零依赖静态词表"族,非字符级 typo);选型与 0908 提到的 R-TYPO-01 计划"同音字"不同方向(同音字需 hanlp 字典);**v0.2 后续可接 LLM 二次校验做上下文豁免**(对齐 v0.1 §4.3 上下文豁免原则)。
+
+#### 词表(4 类 33 条)
+
+| 分类 | 数量 | 词条 |
+|------|------|------|
+| **absolute 绝对化** | 8 | 最佳 / 最好 / 最大 / 最高 / 最优 / 最强 / 最快 / 最便宜 |
+| **ranking 排名/地位** | 9 | 第一 / 唯一 / 首选 / 独家 / 顶级 / 顶尖 / 最高级 / 国家级 / 世界级 |
+| **degree 程度极限** | 9 | 100% / 百分百 / 百分之百 / 永久 / 永远 / 绝对 / 完全 / 完美 / 万能 |
+| **promise 承诺/保证** | 7 | 包过 / 稳赚 / 零风险 / 无风险 / 稳赚不赔 / 无副作用 / 立竿见影 |
+
+#### 检测算法
+
+```
+静态词表 ABSOLUTE_WORDS: 33 条 2+ 字词(避免单字"最"/"全"误报)
+长词优先匹配(按 word.length 降序)+ 区间去重防子串重复报:
+  对每个 word(从长到短):
+    循环 text.indexOf(word, pos):
+      命中位置 idx → 检查是否已被覆盖区间包含
+        - 是 → 跳过(pos 前进 word.length)
+        - 否 → 报 1 hit + 加入 covered[[idx, idx+word.length]]
+所有 hits 按 position 升序输出。
+```
+
+#### 关键设计点
+
+- **零依赖纯字符串查表**: 33 条静态常量,无外部字典 / 无 regex(用 indexOf 查字符串),部署即用
+- **2+ 字词避免单字误报**: 不放"最"/"全"/"好"等单字(日常用语),只放 2+ 字极限词
+- **长词优先匹配 + 区间去重**: 按 word.length 降序排,先吃长词"稳赚不赔"再吃短词"稳赚",两者不重叠位置 0+4 / 5 → 报 2 个 hit,不重复不嵌套
+- **4 类 category 字段**: absolute / ranking / degree / promise 便于客户端差异化提示(法务警示 vs 营销警示 vs 金融承诺)
+- **不豁免**: v0.1 雏形阶段不做上下文豁免,全报;**v0.2 接 LLM 二次校验时再做否定/引用/数字范围等豁免**
+
+#### 扣分公式
+
+```
+score = min(命中处数, 3)
+```
+
+- 每命中 1 处扣 1 分(R-TYPO-08 单条上限 3 分,与 TYPO-02/03/05/06/07 持平)
+- 总扣分 = `min(Σ 12 规则扣分, 5)`
+- verdict 映射: 0 分 → PASS, ≥1 分 → SOFT_WARN(软调,不阻塞)
+
+#### 自检示例
+
+| 原文 | R-TYPO-08 命中 | 改写 |
+|------|----------------|------|
+| 本产品是行业最佳选择,效果最好,稳赚不赔。 | ✅ 命中 3 处("最佳" cat=absolute / "最好" cat=absolute / "稳赚不赔" cat=promise)扣 3 分 | 本产品在业内具有领先优势,效果显著,长期稳健回报。 |
+| 本产品是最佳,行业第一,效果 100%,稳赚。 | ✅ 命中 4 处(4 类全到)扣 3 分达上限 | 本产品在业内具有领先优势,效果显著,长期稳健回报。 |
+| 稳赚不赔,稳赚很轻松。 | ✅ 命中 2 处("稳赚不赔" pos=0 + "稳赚" pos=5 不重叠) | 长期稳健回报,投资灵活。 |
+| 资料已提交,24h 内顾问将联系您 | ❌ 不命中 | (无需改) |
+| 效果很好,推荐使用 | ❌ 不命中("很好" / "推荐" 不在词表) | (无需改) |
+
 ## 4. 验证示例
 
 ### 4.1 桌面端长句(超 40 字,触发 SOFT_WARN)
@@ -616,14 +682,22 @@ curl -X POST http://localhost:3000/api/audit/text \
 - [x] `npx next build` 通过(`/api/audit/text` 路由注册 + 11 规则 meta 正确,production bundle 验证)
 - [x] curl 端到端验证 8 例:启动 `npx next start -p 3301` → **T1 GET 元信息确认 11 规则已实现**(`version: 0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04`,`rules_implemented` 第 3/11 项含 R-READ-03/R-TONE-04)→ **T2 missing-punct 命中**("请确认信息后再次提交" 末"提交"无标点 → read03_hits 1 句 issue=missing-punct 扣 1 分)→ **T3 inconsistent-ending + Tone04 联动**("资料已提交!顾问将联系您!" → read03_hits 2 句 inconsistent-ending + tone04_hits 1 hit 2/2=100% 扣 1 分)→ **T4 疑问句豁免**("你确认吗?请回复" → "你确认吗?"含"吗"豁免 + "请回复" missing-punct 1 命中)→ **T5 Tone04 边界 — 1 感叹 / 2 句 = 50% 命中**("新功能已上线!请立即体验。" → tone04_hits 1 hit)→ **T6 英文双陈述 PASS**("Hello world. Please confirm." → read03_hits=[] tone04_hits=[])→ **T7 中文末"。" PASS 全过**("请确认订单。" → verdict=PASS,read03_hits=[] tone04_hits=[])→ **T8 综合 — 4 句感叹 + 多规则累加 5 分上限**("快来!超棒!新功能!上线啦!" → read03_hits 4 句 + tone04 100% + R-TYPO-03 4 命中,summary 含 11 段)→ 关闭 server
 
+### 6.7 0909 T5(R-TYPO-08 增量:广告法极限词零依赖查表,12 规则收口)
+
+- [x] `npx tsc --noEmit` 通过(0 errors,新 `Typo08Hit` 接口(5 字段:rule/text/position/match/category)+ `ABSOLUTE_WORDS` 静态词表常量(4 类 33 条)+ `checkTypo08` 函数(长词优先匹配 + 区间去重)+ POST handler 12 规则累加 + GET 元信息 12 规则全部类型对齐)
+- [x] `npx eslint .` 通过(0 errors / 0 warnings)
+- [x] `npx next build` 通过(`/api/audit/text` 路由注册 + 12 规则 meta 正确,production bundle 验证)
+- [x] curl 端到端验证 8 例:启动 `npx next dev -p 4123` → **T1 GET 元信息确认 12 规则已实现**(`version: 0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08`,`rules_implemented` 第 9 项含 R-TYPO-08 + `rules_evaluated` 12 条)→ **T2 极限词命中**("本产品是行业最佳选择,效果最好,稳赚不赔。" → typo08_hits 3 处: 最佳 absolute + 最好 absolute + 稳赚不赔 promise,扣 3 分)→ **T3 PASS 用例**("资料已提交,24h 内顾问将联系您" → typo08_hits=[])→ **T4 4 分类分别命中**("本产品是最佳,行业第一,效果100%,稳赚。" → 4 处分别 cat=absolute/ranking/degree/promise)→ **T5 长词优先去重**("这是最好吃的一家店,味道很棒。" → 命中 1 处"最好",未被"最"+"好吃"拆开误报)→ **T6 长词+短词去重**("稳赚不赔,稳赚很轻松。" → 命中 2 处"稳赚不赔" pos=0 + "稳赚" pos=5 不重叠)→ **T7 4 类 33 词累加**("最佳最好最大最高最优最强最快最便宜第一唯一首选独家顶级顶尖最高级国家级世界级100%百分百百分之百永久永远绝对完全完美万能包过稳赚零风险无风险稳赚不赔无副作用立竿见影。" → typo08_hits 33 处 扣 3 分达 TYPO-08_MAX 上限)→ **T8 错误响应**("text": "" → 400 `{"error":"`text` is empty"}`)→ 关闭 dev server
+
 ## 7. 关联文档
 
-- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(累计勾选:启动 v0.1 + R-READ-02 增量 + 5 零依赖规则增量 + R-TYPO-06 增量 + R-TYPO-07 增量 + R-READ-03 + R-TONE-04 增量,共 6 个子项;**§5 Phase 0 接受 7/10 收口,3 项外部依赖项降级 Phase 1.5/Phase 2** 0908 T5 落痕;**§6 主项 2 处备注栏增补** 0908 T5 落痕)
-- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子(0904 T5 落地 R-TYPO-02/03/05;0905 T5 落地 R-TYPO-06;0906 T5 落地 R-TYPO-07)
+- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(累计勾选:启动 v0.1 + R-READ-02 增量 + 5 零依赖规则增量 + R-TYPO-06 增量 + R-TYPO-07 增量 + R-READ-03 + R-TONE-04 增量 + R-TYPO-08 增量,共 7 个子项;**§5 Phase 0 接受 7/10 收口,3 项外部依赖项降级 Phase 1.5/Phase 2** 0908 T5 落痕;**§6 主项 2 处备注栏增补** 0908 T5 落痕;**§6 子项 0908 T5 落痕 + 12 规则收口备注** 0909 T5 落痕)
+- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子(0904 T5 落地 R-TYPO-02/03/05;0905 T5 落地 R-TYPO-06;0906 T5 落地 R-TYPO-07;**0909 T5 落地 R-TYPO-08 广告法极限词零依赖查表**)
 - `docs/审查规则/v0.2_文案审查_品牌词.md` v0.2 规则种子(Phase 1.5)
 - `docs/审查规则/v0.3_文案审查_语气_可读性.md` v0.3 规则种子(0904 T5 落地 R-TONE-02/03;0902-0903 已落地 R-READ-01/02;**0908 T5 落地 R-READ-03 句末标点规范 + R-TONE-04 感叹号密度,沿用 v0.3 ID 与命名空间**)
 - `docs/a11y/axe-core_基线_v0.1.md` 0901 T5 落地
 - `README.md` 增补"无 plan,临时决策"约定(0904 T5 兑现 0904 巡检"高优"项 D)
+- `.plan/20260909.md` 临时 plan 决策依据留痕(无 plan 漂移模式第 8 天延续)
 
 ## 8. 变更记录
 
@@ -635,3 +709,4 @@ curl -X POST http://localhost:3000/api/audit/text \
 | 2026-09-05 | v0.1 API 三次增量 R-TYPO-06 数字/英文与中文之间空格缺失(pangu 风格,7 → 8 规则):`app/api/audit/text/route.ts` 新增 `Typo06Hit` 接口 + `checkTypo06` 函数(**2 个独立 regex** PANGU_CJK_ASCII_RE / PANGU_ASCII_CJK_RE 双向独立扫描 + 合并后 position 升序;**初版用单 regex matchAll 漏掉"1次"已修复**)+ POST handler 8 规则累加(score 上限 5 分)+ GET 元信息 8 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06` + 文档 §1/§2.3/§3.6/§6.4/§7/§8 全部对齐 + `.plan/20260905.md` 临时决策依据留痕;**无 plan,临时决策**(0902-0903-0904 漂移模式第 4 天延续,0829 起 `.plan/` 漂移模式已稳定 7 天;**0825-0905 共 12 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 7 规则扩到 8 规则,代码资产 0.3 → 0.4 起步** | 03:30 T5 cron |
 | 2026-09-06 | v0.1 API 四次增量 R-TYPO-07 连续标点符号(8 → 9 规则):`app/api/audit/text/route.ts` 新增 `Typo07Hit` 接口(7 字段:rule/text/position/match/run_length/punct/punct_type)+ `checkTypo07` 函数(**1 个 regex** REPEAT_PUNCT_RE `/([.!?。！？])\1{2,}/g` 后行引用扫"≥ 3 同标点连用" + cjk/latin 分类用 unicode 范围 0x3000-0x303F / 0xFF01-0xFF60)+ POST handler 9 规则累加(score 上限 5 分)+ GET 元信息 9 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07` + 文档 §1/§2.3/§3.7/§6.5/§7/§8 全部对齐;**无 plan,临时决策**(0902-0903-0904-0905 漂移模式第 5 天延续,0829 起 `.plan/` 漂移模式已稳定 8 天;**0825-0906 共 13 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 8 规则扩到 9 规则,代码资产 0.4 → 0.5 起步**;R-TYPO-07 选型:零依赖纯 regex + 后行引用,6 标点(中英各 3)覆盖,无白名单(连续 3+ 几乎一定是手滑/语气过激),run_length 上报便于客户端提示 | 03:30 T5 cron |
 | 2026-09-08 | v0.1 API 五次增量 v0.3 二规则零依赖扩展(9 → 11 规则,恢复 0907 T5 首次断档后连续节奏):`app/api/audit/text/route.ts` 新增 `Read03Hit` 接口(6 字段:rule/sentence/position/issue/actual_ending/primary_script)+ `Tone04Hit` 接口(5 字段:rule/exclam_count/sentence_count/ratio/threshold)+ `checkRead03` 函数(**独立 regex** SENTENCE_WITH_ENDING_RE `/[^。！？!?;；]*[。！？!?;；]?/g` 保留句末标点扫描 + 中英合法标点集判定 CJK_STATEMENT_ENDINGS(7 个)/ LATIN_STATEMENT_ENDINGS(5 个)+ 疑问/感叹语气词白名单 `INTERROGATIVE_PARTICLES = /[吗呢吧呀啊哦哇哎]/` 豁免末"!"/"?"的疑问/感叹句 + issue 双分类 `missing-punct`(无标点)/ `inconsistent-ending`(陈述句末"!"/"?")+ `checkTone04` 函数(EXCLAM_RE `/[!！]/g` 扫中英感叹号数 / splitSentences 句子数 → ratio > 0.3 即报,全篇级只报 1 hit)+ POST handler 11 规则累加(score 上限 5 分)+ GET 元信息 11 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04` + 文档 §1/§2.3/§3.8-3.9/§5/§6.6/§7/§8 全部对齐;**`npx tsc --noEmit` / `npx eslint .` / `npx next build` 三验证通过**(初版 `splitSentences` 复赋值未用 ESLint 警告已修)+ 8 个 curl 端到端用例全过(T1 GET 11 规则 / T2 missing-punct 命中 / T3 inconsistent-ending 2 命中 + Tone04 100% / T4 疑问句"吗"豁免 + missing-punct / T5 1 感叹 / 2 句 = 50% 命中 / T6 英文双陈述 PASS / T7 中文末"。" PASS / T8 综合 4 句感叹 + 多规则累加 5 分上限);**无 plan,临时决策**(0902-0903-0904-0905-0906-0907-0908 漂移模式第 7 天延续,0829 起 `.plan/` 漂移模式已稳定 10 天;**0907 T5 首次断档后 0908 T5 恢复连续节奏**;**0825-0908 共 15 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 9 规则扩到 11 规则,代码资产 0.5 → 0.6 起步;目标 12+ 规则收口**;选型理由:① 零依赖纯 regex(SENTENCE_WITH_ENDING_RE 解决 splitSentences 剥标点问题);② 中英双标点集覆盖完整;③ 疑问/感叹语气词白名单豁免"?"末"/"!"/"吗呢吧呀"等合法疑问/感叹场景,避免误报;④ R-READ-03 命名沿用 v0.3 种子 ID 但语义替换为"句末标点规范"(原 LLM 版"信息密度"留 R-READ-03-LLM 标注);⑤ R-TONE-04 命名沿用 v0.3 种子 TONE-01~04 序列("感叹号密度"),属零依赖纯机检;**同步兑现 0907 巡检 4 项"最高优"建议**:`项目开发计划.md` §5 末尾 + §6 主项 2 处备注栏 + §6 子项 0908 T5 主交付留痕(0904 中优建议累计跨 5 天(0904-0905-0906-0907-0908)0908 T5 一次性兑现);**后续可再扩 v0.1 错别字 1-2 条 R-TYPO-08 同音字词表(零依赖 Top 50 子集) 收口 12+ 规则** | 03:30 T5 cron |
+| 2026-09-09 | v0.1 API 六次增量 R-TYPO-08 广告法极限词零依赖查表(**11 → 12 规则收口**,兑现 0908 巡检建议):`app/api/audit/text/route.ts` 新增 `Typo08Hit` 接口(5 字段:rule/text/position/match/category)+ `ABSOLUTE_WORDS` 静态词表常量(**4 类 33 条 2+ 字词**:absolute 绝对化 8 条 / ranking 排名 9 条 / degree 程度 9 条 / promise 承诺 7 条)+ `checkTypo08` 函数(零依赖纯字符串查表 + **长词优先匹配** 按 word.length 降序 + **区间去重** 防子串重复报,如"稳赚不赔"与"稳赚"分别报 1 次不嵌套)+ POST handler 12 规则累加(score 上限 5 分,单条 TYPO-08 上限 3 分)+ GET 元信息 12 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08` + 文档 §1/§2.3/§3.10/§6.7/§7/§8 全部对齐 + `docs/审查规则/v0.1_...md` §3 增 R-TYPO-08 规则定义(词表/算法/示例)+ §10 变更记录追加 0909 行;**`npx tsc --noEmit` / `npx eslint .` / `npx next build` 三验证通过** + 8 个 curl 端到端用例全过(T1 GET 12 规则 / T2 极限词命中 3 处 / T3 PASS 用例 / T4 4 分类分别命中 / T5 长词优先"最好吃"不拆 / T6 长词+短词"稳赚不赔"+"稳赚"不重叠 / T7 4 类 33 词累加扣 3 分上限 / T8 错误响应 400);**无 plan,临时决策**(0902-0903-0904-0905-0906-0907-0908-0909 漂移模式第 8 天延续,0829 起 `.plan/` 漂移模式已稳定 11 天;**0825-0909 共 16 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 11 规则扩到 12 规则,代码资产 0.6 → 0.7 起步;0908 巡检建议"目标 12+ 规则收口"100% 兑现**;R-TYPO-08 选型理由:① 零依赖纯字符串查表 + 2+ 字词避免单字"最"/"全"误报;② 长词优先匹配 + 区间去重避免"稳赚"与"稳赚不赔"重复报;③ 4 类 category 字段(absolute / ranking / degree / promise)便于客户端差异化提示(法务警示 vs 营销警示 vs 金融承诺);④ 选型与 0908 提到的 R-TYPO-01 计划"同音字"不同方向(同音字需 hanlp 字典),R-TYPO-08 属"零依赖静态词表"族,纯字符串查表无外部依赖;**v0.2 后续可接 LLM 二次校验做上下文豁免**(对齐 v0.1 §4.3 上下文豁免原则);**Phase 1 §6 模块 1 12 规则收口,后续可启动异常场景发现器 + A11y 审查 v1 + 飞书 bot 触发接入 + 健康度曲线 + dogfood 等其他模块** | 03:30 T5 cron |
