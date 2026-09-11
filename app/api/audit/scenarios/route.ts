@@ -9,6 +9,14 @@
  *   - permission(权限):5 条
  *   - device(设备):5 条
  *   - 合计 28 条异常场景,每条含 id/category/title/description/trigger/expected/severity
+ * - 2026-09-12 T5 03:30:增量 7 条触发类型库扩展(28 → 35 条,5 类各扩 1-2 条;v0.1 雏形语义不变,v0.2 计划仍接 PRD 关键词深度匹配)
+ *   - SC-B-09 重复 ID/数据唯一性冲突
+ *   - SC-B-10 多选字段超选边界
+ *   - SC-C-06 缓存击穿/雪崩
+ *   - SC-N-06 HTTPS 证书错误
+ *   - SC-N-07 跨域 CORS 失败
+ *   - SC-P-06 操作审计/合规留痕
+ *   - SC-D-06 暗黑模式/主题切换
  *
  * 设计思路(v0.1 雏形):
  * - 零依赖纯模板:5 类异常场景库(SCENARIO_LIBRARY)是静态常量,POST 直接按 feature 关键词做"触发类型匹配",
@@ -74,7 +82,8 @@ interface ScenariosResponse {
 }
 
 // ============================================================
-// 5 类异常场景库(静态常量,28 条,零外部依赖)
+// 5 类异常场景库(静态常量,35 条,零外部依赖)
+// 2026-09-10 启动 28 条;2026-09-12 T5 增量 7 条触发类型库扩展 → 35 条
 // ============================================================
 
 const SCENARIO_LIBRARY: Scenario[] = [
@@ -167,6 +176,28 @@ const SCENARIO_LIBRARY: Scenario[] = [
     applicable_to: [],
     keywords: ["列表", "订单", "评论", "消息", "商品", "搜索结果", "历史"],
   },
+  {
+    id: "SC-B-09",
+    category: "boundary",
+    title: "重复 ID/数据唯一性冲突",
+    description: "主键/唯一索引字段被重复插入导致 500 或脏数据",
+    trigger: "用户重复提交相同订单号/手机号/身份证号,或并发请求同一资源 ID",
+    expected: "前端预校验 + 后端唯一索引兜底(返回明确错误码,如 409 Conflict),不允许脏数据落库",
+    severity: "high",
+    applicable_to: [],
+    keywords: ["订单", "ID", "唯一", "重复", "主键", "索引", "手机号", "身份证", "提交", "创建"],
+  },
+  {
+    id: "SC-B-10",
+    category: "boundary",
+    title: "多选字段超选边界",
+    description: "标签/权限/角色等多选字段超过上限或选 0 个",
+    trigger: "用户给文章选 100+ 标签 / 给用户分配 0 个角色",
+    expected: "前端限制提示(>20 个)+ 后端校验必选 ≥ 1 且 ≤ 上限,中间表事务保证一致性",
+    severity: "medium",
+    applicable_to: [],
+    keywords: ["标签", "权限", "角色", "分类", "多选", "checkbox", "批量"],
+  },
 
   // ---- concurrency 并发(5 条) ----
   {
@@ -223,6 +254,17 @@ const SCENARIO_LIBRARY: Scenario[] = [
     severity: "medium",
     applicable_to: [],
     keywords: ["接口", "请求", "列表", "详情", "加载"],
+  },
+  {
+    id: "SC-C-06",
+    category: "concurrency",
+    title: "缓存击穿/雪崩",
+    description: "热点 key 过期瞬间大量请求穿透到 DB,或大量 key 同时过期导致 DB 瞬时压力",
+    trigger: "明星微博/秒杀商品缓存过期瞬间 10w QPS 直击 DB",
+    expected: "单飞模式(只允许 1 个请求回源)+ 永不过期(异步刷新)+ 随机过期偏移防雪崩",
+    severity: "critical",
+    applicable_to: [],
+    keywords: ["缓存", "Redis", "击穿", "雪崩", "热点", "秒杀", "活动", "首页", "详情"],
   },
 
   // ---- network 网络(5 条) ----
@@ -281,6 +323,28 @@ const SCENARIO_LIBRARY: Scenario[] = [
     applicable_to: [],
     keywords: ["接口", "请求", "访问", "公网"],
   },
+  {
+    id: "SC-N-06",
+    category: "network",
+    title: "HTTPS 证书错误",
+    description: "证书过期/自签名证书/证书链不全/域名不匹配",
+    trigger: "服务端证书过期或客户端系统时间错误",
+    expected: "前端明确错误页(说明证书问题)+ 避免静默降级到 HTTP(防止中间人攻击)",
+    severity: "high",
+    applicable_to: [],
+    keywords: ["HTTPS", "证书", "SSL", "TLS", "请求", "接口", "API"],
+  },
+  {
+    id: "SC-N-07",
+    category: "network",
+    title: "跨域 CORS 失败",
+    description: "浏览器跨域请求被同源策略拦截,预检(OPTIONS)失败",
+    trigger: "前端 www.a.com 调用 api.b.com 缺少 Access-Control-Allow-Origin 头",
+    expected: "后端正确配置 CORS(允许源/方法/头/凭证)+ 预检缓存(Access-Control-Max-Age)",
+    severity: "medium",
+    applicable_to: [],
+    keywords: ["跨域", "CORS", "请求", "接口", "API", "前端", "OPTIONS"],
+  },
 
   // ---- permission 权限(5 条) ----
   {
@@ -337,6 +401,17 @@ const SCENARIO_LIBRARY: Scenario[] = [
     severity: "medium",
     applicable_to: [],
     keywords: ["角色", "权限", "VIP", "会员", "状态"],
+  },
+  {
+    id: "SC-P-06",
+    category: "permission",
+    title: "操作审计/合规留痕",
+    description: "敏感操作(删除/导出/支付)未留痕,合规审计无法追溯",
+    trigger: "管理员在后台删除用户数据,无审计日志记录操作人/时间/IP/操作内容",
+    expected: "统一审计中间件(记录 who/when/where/what/why)+ 敏感操作二次确认 + 日志不可篡改",
+    severity: "high",
+    applicable_to: [],
+    keywords: ["审计", "日志", "合规", "删除", "导出", "支付", "管理", "后台", "敏感"],
   },
 
   // ---- device 设备(5 条) ----
@@ -395,6 +470,17 @@ const SCENARIO_LIBRARY: Scenario[] = [
     applicable_to: [],
     keywords: ["页面", "兼容性", "渲染", "WebView", "浏览器"],
   },
+  {
+    id: "SC-D-06",
+    category: "device",
+    title: "暗黑模式/主题切换",
+    description: "系统暗黑模式触发或用户手动切换主题,部分组件未适配",
+    trigger: "用户开启系统暗黑模式或点击切换主题按钮",
+    expected: "CSS 变量驱动的双主题 + 图片/图标双套(浅/深)+ 检测 prefers-color-scheme",
+    severity: "low",
+    applicable_to: [],
+    keywords: ["暗黑", "主题", "深色", "深色模式", "页面", "图片", "颜色", "切换"],
+  },
 ];
 
 const CATEGORY_LABEL: Record<Category, string> = {
@@ -405,7 +491,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   device: "设备",
 };
 
-const API_VERSION = "0.1.0-API-雏形";
+const API_VERSION = "0.1.0-API-雏形+7-触发类型库扩展";
 
 // ============================================================
 // 工具函数
@@ -667,7 +753,7 @@ export async function GET() {
       rules_skipped: [
         "PRD 关键词深度匹配(v0.2 计划,接 LLM 或词典匹配)",
         "LLM 二次校验(v0.3 计划,接 Claude Sonnet 4.5)",
-        "R-SCENE-01~99 子规则细分(目前 28 条为顶层场景,后续可按行业细分子规则)",
+        "R-SCENE-01~99 子规则细分(目前 35 条为顶层场景,0912 T5 已扩 7 条,后续可按行业细分子规则)",
       ],
       docs: "docs/api/audit-scenarios-v0.1.md",
       related_apis: [
