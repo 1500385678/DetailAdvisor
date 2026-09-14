@@ -1,7 +1,7 @@
 /**
- * 异常场景发现器 API · v0.1 API 雏形
+ * 异常场景发现器 API · v0.2 PRD 关键词深度匹配 雏形
  *
- * Phase 1 §6 模块 3"上线异常场景发现器"启动
+ * Phase 1 §6 模块 3"上线异常场景发现器"启动 + v0.2 PRD 关键词深度匹配 雏形
  * - 2026-09-10 T5 03:30:启动 commit,落 5 类异常场景库(零依赖纯模板,Phase 1 §6 收口后第一个非文案模块)
  *   - boundary(边界值):8 条
  *   - concurrency(并发):5 条
@@ -20,15 +20,24 @@
  * - 2026-09-14 T5 03:30:增量 2 条财务/微服务场景(35 → 37 条,延续 0910-0912 触发类型库扩展路径,无 plan 临时决策模式第 14 天延续 + 0913 断档后 0914 恢复连续节奏)
  *   - SC-B-11 浮点精度/财务舍入
  *   - SC-C-07 分布式锁/资源竞争
- *   严重度分布更新:critical 3 / high 14 / medium 14 / low 6 = 37 条;high+critical 17 条(45.9%)
- *   主计划 §6 同步决策勾选(方案 C 模式 + 新增"验收上线异常场景发现器"主项)
+ *   - 严重度分布更新:critical 3 / high 14 / medium 14 / low 6 = 37 条;high+critical 17 条(45.9%)
+ *   - 主计划 §6 同步决策勾选(方案 C 模式 + 新增"验收上线异常场景发现器"主项)
+ * - 2026-09-15 T5 03:30:启动 v0.2 PRD 关键词深度匹配 雏形(37 → 42 条,新增 5 条 v0.2 子场景 + PRD_KEYWORD_DICT 静态关键词词典 + prd 字段真正参与场景匹配;v0.1 feature 关键词命中语义不变,v0.2 仅增强"按 PRD 文本追加行业子场景",采纳 0915 巡检"特别建议路线图 B'"决策,无 plan 临时决策模式第 15 天延续)
+ *   - SC-B-12 支付金额边界(boundary, high, PRD 关键词"支付/订单/退款/金额/费率")
+ *   - SC-B-13 账号锁定/失败重试(boundary, medium, PRD 关键词"登录/注册/密码/账号/锁定/重试/验证码")
+ *   - SC-C-08 消息队列堆积/消费者滞后(concurrency, high, PRD 关键词"消息/队列/异步/推送/Kafka/MQ/RabbitMQ")
+ *   - SC-N-08 支付网关超时/3D-Secure 回调失败(network, high, PRD 关键词"支付/网关/3D-Secure/回调/webhook")
+ *   - SC-P-07 密码强度/账号安全策略(permission, medium, PRD 关键词"登录/注册/密码/账号/策略")
+ *   - 严重度分布更新:critical 3 / high 16 / medium 15 / low 6 = 42 条;high+critical 19 条(45.2%)
+ *   - PRD_KEYWORD_DICT 词典 5 组关键词(支付/登录注册/异步/网关/合规)→ 5 条子场景;prd 字段从 v0.1"仅记录不解析"升级为 v0.2"扫描关键词追加子场景"
  *
- * 设计思路(v0.1 雏形):
- * - 零依赖纯模板:5 类异常场景库(SCENARIO_LIBRARY)是静态常量,POST 直接按 feature 关键词做"触发类型匹配",
- *   不命中关键词则返回全 5 类完整清单
- * - 不做"按 PRD 文本生成新场景",只做"按模板筛选 + 全清单兜底"两档
- * - v0.2 可接 PRD 关键词匹配扩展(v0.1 是 v0.2 的子集)
- * - v0.3 可接 LLM 二次校验(类似 v0.1 文案审查的 R-READ-02 路径)
+ * 设计思路(v0.2 PRD 关键词深度匹配 雏形):
+ * - v0.1 基础 37 条保留不变;v0.2 新增 5 条 v0.2 子场景(SCENARIO_LIBRARY_V02_PRD)按 PRD 关键词命中追加
+ * - PRD_KEYWORD_DICT 是零依赖静态关键词词典(5 组关键词 → 5 条子场景),prd 文本 lowercase + includes 扫描
+ * - 不做 LLM 二次校验,只做关键词命中 → 子场景追加;v0.3 可接 Claude Sonnet 4.5 做"场景是否真实存在"的二次校验
+ * - filterScenarios 返回值增加 prd_matched_scenarios(命中的 v0.2 子场景)+ prd_keywords_matched(命中的关键词)
+ * - 5 类主库 37 条 + 5 条 v0.2 子场景 = 42 条,v0.2 不改 SCENARIO_LIBRARY 主库顺序,只追加子场景
+ * - meta.filter_mode 增加 "prd" 取值(纯 PRD 命中,无 feature 关键词)
  *
  * 接口:
  * - POST /api/audit/scenarios
@@ -79,10 +88,12 @@ interface ScenariosResponse {
   meta: {
     api_version: string;
     feature_keywords_matched: string[];
+    prd_keywords_matched: string[]; // v0.2 新增:PRD 文本命中的关键词
+    prd_matched_scenarios: string[]; // v0.2 新增:命中的 v0.2 子场景 ID 列表
     categories_requested: Category[];
     categories_returned: Category[];
     scenarios_per_category: Record<Category, number>;
-    filter_mode: "all" | "category" | "keyword";
+    filter_mode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd";
   };
 }
 
@@ -510,6 +521,77 @@ const SCENARIO_LIBRARY: Scenario[] = [
   },
 ];
 
+// ============================================================
+// v0.2 PRD 关键词深度匹配 子场景库(5 条,零依赖纯关键词词典)
+// 2026-09-15 T5 启动:主库 37 条 + v0.2 子场景 5 条 = 42 条;prd 字段从"仅记录"升级为"扫描关键词追加子场景"
+// 与 SCENARIO_LIBRARY 同形状 Scenario,keywords 字段用于 PRD 文本扫描匹配
+// ============================================================
+
+const SCENARIO_LIBRARY_V02_PRD: Scenario[] = [
+  // ---- boundary v0.2(2 条) ----
+  {
+    id: "SC-B-12",
+    category: "boundary",
+    title: "支付金额边界(v0.2 PRD)",
+    description: "支付场景金额边界:0 元/0.01 元/超大金额/负数/小数位超 2 位",
+    trigger: "PRD 含支付/订单/退款,用户输入金额 0 / 0.01 / 9999999999 / -1 / 100.123",
+    expected: "前端金额输入框 min/max/step 校验 + 后端独立校验(0/负数/超 2 位小数拒绝)+ 支付网关风控拦截(超大金额需人工审核)",
+    severity: "high",
+    applicable_to: ["payment", "order"],
+    keywords: ["支付", "订单", "退款", "金额", "费率", "结算", "充值"],
+  },
+  {
+    id: "SC-B-13",
+    category: "boundary",
+    title: "账号锁定/失败重试(v0.2 PRD)",
+    description: "登录/注册场景账号锁定策略:连续失败 N 次锁定 + 验证码重试上限 + 密码过期边界",
+    trigger: "PRD 含登录/注册,用户连续输错密码 5 次 / 验证码输错 10 次 / 密码超过 90 天未修改",
+    expected: "账号锁定策略(连续失败 5 次锁 30 分钟)+ 验证码单次有效期 5 分钟 + 密码 90 天过期提醒 + 邮箱/短信解锁流程",
+    severity: "medium",
+    applicable_to: ["login", "register"],
+    keywords: ["登录", "注册", "密码", "账号", "锁定", "重试", "验证码", "找回"],
+  },
+
+  // ---- concurrency v0.2(1 条) ----
+  {
+    id: "SC-C-08",
+    category: "concurrency",
+    title: "消息队列堆积/消费者滞后(v0.2 PRD)",
+    description: "异步消息场景:Kafka/MQ 消费者处理速度跟不上生产者,消息堆积导致延迟",
+    trigger: "PRD 含消息/队列/异步/推送,突发流量峰值消费者处理延迟 > 30s,消息堆积超 10000 条",
+    expected: "消费者水平扩缩容(K8s HPA)+ 死信队列兜底 + 告警阈值(堆积 > 5000 触发)+ 幂等消费 + 监控 dashboard",
+    severity: "high",
+    applicable_to: ["async", "message"],
+    keywords: ["消息", "队列", "异步", "推送", "kafka", "mq", "rabbitmq", "rocketmq", "事件"],
+  },
+
+  // ---- network v0.2(1 条) ----
+  {
+    id: "SC-N-08",
+    category: "network",
+    title: "支付网关超时/3D-Secure 回调失败(v0.2 PRD)",
+    description: "支付场景网关通信异常:网关超时/3D-Secure 验证失败/异步回调 webhook 丢失",
+    trigger: "PRD 含支付/网关/3D-Secure/回调/webhook,网关返回 504 / 用户关闭 3D-Secure 弹窗 / webhook 回调丢失",
+    expected: "网关超时重试(指数退避 3 次)+ 3D-Secure 失败降级到本地风控 + webhook 幂等 + 主动轮询对账(订单状态 30s 同步)+ 资金安全兜底(支付成功但订单未更新时人工介入)",
+    severity: "high",
+    applicable_to: ["payment"],
+    keywords: ["支付", "网关", "3d-secure", "回调", "webhook", "对账", "异步通知"],
+  },
+
+  // ---- permission v0.2(1 条) ----
+  {
+    id: "SC-P-07",
+    category: "permission",
+    title: "密码强度/账号安全策略(v0.2 PRD)",
+    description: "登录/注册场景密码强度校验:长度/复杂度/弱密码字典/历史密码复用",
+    trigger: "PRD 含登录/注册/密码,用户设置 123456 / 与最近 3 次密码相同 / 仅数字 / 长度 < 8",
+    expected: "前端密码强度可视化(zxcvbn 等算法)+ 后端强校验(8+ 位 + 大小写 + 数字 + 特殊字符)+ 弱密码字典(2024 公开 Top 100 弱密码)+ 历史密码复用拒绝 + 首次登录强制改默认密码",
+    severity: "medium",
+    applicable_to: ["login", "register"],
+    keywords: ["登录", "注册", "密码", "账号", "策略", "强度", "弱密码", "安全"],
+  },
+];
+
 const CATEGORY_LABEL: Record<Category, string> = {
   boundary: "边界值",
   concurrency: "并发",
@@ -518,17 +600,23 @@ const CATEGORY_LABEL: Record<Category, string> = {
   device: "设备",
 };
 
-const API_VERSION = "0.1.0-API-雏形+7-触发类型库扩展+2-财务微服务";
+const API_VERSION = "0.2.0-API-雏形+7-触发类型库扩展+2-财务微服务+PRD关键词深度匹配";
 
 // ============================================================
 // 工具函数
 // ============================================================
 
-/** 按 feature 关键词 + 可选 categories 过滤场景库 */
-function filterScenarios(feature: string, categories?: Category[]): {
+/** 按 feature 关键词 + 可选 categories 过滤场景库 + v0.2 PRD 关键词深度匹配 */
+function filterScenarios(
+  feature: string,
+  categories?: Category[],
+  prd?: string,
+): {
   filtered: Scenario[];
   matchedKeywords: string[];
-  filterMode: "all" | "category" | "keyword";
+  prdMatchedScenarios: Scenario[];
+  prdKeywordsMatched: string[];
+  filterMode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd";
 } {
   const lowerFeature = feature.toLowerCase().trim();
 
@@ -551,12 +639,51 @@ function filterScenarios(feature: string, categories?: Category[]): {
     }
   }
 
+  // v0.2 PRD 关键词深度匹配:扫描 prd 文本,命中 v0.2 子场景关键词 → 追加到结果列表
+  const prdMatchedScenarios: Scenario[] = [];
+  const prdKeywordsMatched: string[] = [];
+  if (typeof prd === "string" && prd.trim() !== "") {
+    const lowerPrd = prd.toLowerCase().trim();
+    const matchedIds = new Set<string>();
+    for (const s of SCENARIO_LIBRARY_V02_PRD) {
+      // v0.2 子场景关键词命中(任一关键词命中即追加该子场景,按 ID 去重)
+      for (const kw of s.keywords) {
+        if (lowerPrd.includes(kw.toLowerCase())) {
+          matchedIds.add(s.id);
+          if (!prdKeywordsMatched.includes(kw)) {
+            prdKeywordsMatched.push(kw);
+          }
+          break; // 一条子场景命中一次即可
+        }
+      }
+    }
+    for (const s of SCENARIO_LIBRARY_V02_PRD) {
+      if (matchedIds.has(s.id)) {
+        // 类别过滤时也按 categories 限定 v0.2 子场景
+        if (categories && categories.length > 0 && !categories.includes(s.category)) {
+          continue;
+        }
+        prdMatchedScenarios.push(s);
+      }
+    }
+  }
+
   // v0.1 雏形:有类别过滤就过滤,无类别就全清单;关键词仅记录不剔除
-  // 后续 v0.2 可扩展:无关键词命中且无类别过滤时,降级为"返回全清单 + 提示"模式
+  // v0.2 增强:PRD 命中追加 v0.2 子场景(去重),filter_mode 增加 prd 维度
+  const baseMode: "all" | "category" | "keyword" = matchedKeywords.length > 0 && filterMode === "all" ? "keyword" : filterMode;
+  let combinedMode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd" = baseMode;
+  if (prdMatchedScenarios.length > 0) {
+    if (baseMode === "keyword") combinedMode = "keyword+prd";
+    else if (baseMode === "category") combinedMode = "category+prd";
+    else if (baseMode === "all") combinedMode = "prd";
+  }
+
   return {
     filtered: pool,
     matchedKeywords,
-    filterMode: matchedKeywords.length > 0 && filterMode === "all" ? "keyword" : filterMode,
+    prdMatchedScenarios,
+    prdKeywordsMatched,
+    filterMode: combinedMode,
   };
 }
 
@@ -598,12 +725,14 @@ function unicodeLength(s: string): number {
   return Array.from(s).length;
 }
 
-/** 拼装 summary */
+/** 拼装 summary(v0.2 增加 PRD 命中子场景数 + PRD 关键词命中信息) */
 function buildSummary(
   grouped: Record<Category, Scenario[]>,
   scoreComplexity: 1 | 2 | 3 | 4 | 5,
   feature: string,
   matchedKeywords: string[],
+  prdMatchedCount: number = 0,
+  prdKeywordsMatched: string[] = [],
 ): string {
   const parts: string[] = [];
   const total = (Object.values(grouped) as Scenario[][]).reduce((sum, arr) => sum + arr.length, 0);
@@ -620,6 +749,14 @@ function buildSummary(
 
   if (matchedKeywords.length > 0) {
     parts.push(`关键词命中:${matchedKeywords.slice(0, 5).join("/")}${matchedKeywords.length > 5 ? "..." : ""}`);
+  }
+
+  // v0.2 PRD 关键词深度匹配命中信息
+  if (prdMatchedCount > 0) {
+    parts.push(`PRD 命中 v0.2 子场景:${prdMatchedCount} 条`);
+    if (prdKeywordsMatched.length > 0) {
+      parts.push(`PRD 关键词:${prdKeywordsMatched.slice(0, 5).join("/")}${prdKeywordsMatched.length > 5 ? "..." : ""}`);
+    }
   }
 
   return parts.join(";");
@@ -696,14 +833,27 @@ export async function POST(request: Request) {
 
   const requestedCategories = body.categories && body.categories.length > 0 ? body.categories : validCategories;
 
-  // 3. 过滤场景
-  const { filtered, matchedKeywords, filterMode } = filterScenarios(body.feature, body.categories);
+  // 3. 过滤场景(v0.2 prd 字段真正参与匹配,追加 v0.2 子场景到 grouped)
+  const {
+    filtered,
+    matchedKeywords,
+    prdMatchedScenarios,
+    prdKeywordsMatched,
+    filterMode,
+  } = filterScenarios(body.feature, body.categories, body.prd);
+
+  // v0.2 PRD 命中的子场景追加到 grouped(按类别分组)
   const grouped = groupByCategory(filtered);
-  const scoreComplexity = calcComplexityScore(filtered, grouped);
+  for (const s of prdMatchedScenarios) {
+    grouped[s.category].push(s);
+  }
+
+  const allReturned = [...filtered, ...prdMatchedScenarios];
+  const scoreComplexity = calcComplexityScore(allReturned, grouped);
 
   // 4. 拼装响应
-  const totalScenarios = filtered.length;
-  const summary = buildSummary(grouped, scoreComplexity, body.feature.trim(), matchedKeywords);
+  const totalScenarios = filtered.length + prdMatchedScenarios.length;
+  const summary = buildSummary(grouped, scoreComplexity, body.feature.trim(), matchedKeywords, prdMatchedScenarios.length, prdKeywordsMatched);
 
   const response: ScenariosResponse = {
     feature: body.feature.trim(),
@@ -714,6 +864,8 @@ export async function POST(request: Request) {
     meta: {
       api_version: API_VERSION,
       feature_keywords_matched: matchedKeywords,
+      prd_keywords_matched: prdKeywordsMatched,
+      prd_matched_scenarios: prdMatchedScenarios.map((s) => s.id),
       categories_requested: requestedCategories,
       categories_returned: requestedCategories,
       scenarios_per_category: {
@@ -755,17 +907,17 @@ export async function GET() {
       content_type: "application/json",
       request_shape: {
         feature: "string (required, ≤ 200 字符,功能名)",
-        prd: "string (optional,产品需求描述,v0.1 仅记录不解析)",
+        prd: "string (optional,产品需求描述,v0.2 升级:扫描关键词命中 v0.2 子场景库 5 条;v0.1 仅记录不解析)",
         categories:
           "boundary | concurrency | network | permission | device[] (optional,默认全 5 类)",
       },
       response_shape: {
         feature: "string (回传)",
-        total_scenarios: "number",
-        by_category: "Record<5 类, Scenario[]> 每类 0-N 条",
+        total_scenarios: "number (37 主库 + N v0.2 子场景)",
+        by_category: "Record<5 类, Scenario[]> 每类 0-N 条(含 v0.2 子场景)",
         score_complexity: "1 | 2 | 3 | 4 | 5 (基于返回场景数 + 命中类别数)",
-        summary: "string (拼装中文摘要)",
-        meta: "元信息(版本/关键词命中/categories/scenarios_per_category/filter_mode)",
+        summary: "string (拼装中文摘要,v0.2 含 PRD 命中子场景数)",
+        meta: "元信息(版本/feature 关键词命中/PRD 关键词命中/PRD 命中 v0.2 子场景 ID/categories/scenarios_per_category/filter_mode)",
       },
       categories_implemented: [
         { id: "boundary", label: "边界值", count: scenariosPerCategory.boundary },
@@ -775,14 +927,32 @@ export async function GET() {
         { id: "device", label: "设备", count: scenariosPerCategory.device },
       ],
       total_scenarios: SCENARIO_LIBRARY.length,
+      v02_prd_scenarios: SCENARIO_LIBRARY_V02_PRD.length,
+      total_scenarios_with_prd: SCENARIO_LIBRARY.length + SCENARIO_LIBRARY_V02_PRD.length,
+      prd_keyword_dict: SCENARIO_LIBRARY_V02_PRD.map((s) => ({
+        scenario_id: s.id,
+        category: s.category,
+        title: s.title,
+        severity: s.severity,
+        applicable_to: s.applicable_to,
+        trigger_keywords: s.keywords,
+      })),
       severity_levels: ["low", "medium", "high", "critical"],
-      filter_modes: ["all(全 5 类清单兜底)", "category(按 categories 过滤)", "keyword(feature 关键词命中提示)"],
-      rules_skipped: [
-        "PRD 关键词深度匹配(v0.2 计划,接 LLM 或词典匹配)",
-        "LLM 二次校验(v0.3 计划,接 Claude Sonnet 4.5)",
-        "R-SCENE-01~99 子规则细分(目前 37 条为顶层场景,0912 T5 已扩 7 条,0914 T5 再扩 2 条,后续可按行业细分子规则)",
+      filter_modes: [
+        "all(全 5 类清单兜底)",
+        "category(按 categories 过滤)",
+        "keyword(feature 关键词命中提示)",
+        "prd(PRD 文本命中 v0.2 子场景)",
+        "keyword+prd(feature + PRD 双命中)",
+        "category+prd(类别过滤 + PRD 命中)",
       ],
-      docs: "docs/api/audit-scenarios-v0.1.md",
+      rules_skipped: [
+        "PRD 关键词上下文豁免(v0.2.1 计划,如'支付宝'作为支付品牌不算支付场景)",
+        "PRD 多关键词权重排序(v0.2.1 计划,目前仅命中即追加)",
+        "LLM 二次校验(v0.3 计划,接 Claude Sonnet 4.5 做'场景是否真实存在'校验)",
+        "R-SCENE-01~99 子规则细分(目前 42 条为顶层场景,0912 T5 已扩 7 条,0914 T5 再扩 2 条,0915 T5 再扩 5 条 v0.2 PRD 子场景)",
+      ],
+      docs: "docs/api/audit-scenarios-v0.2.md",
       related_apis: [
         { name: "文案审查器", endpoint: "/api/audit/text", version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08" },
       ],
