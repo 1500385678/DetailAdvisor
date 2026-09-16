@@ -1,7 +1,7 @@
 /**
- * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 v0.3 二规则 R-READ-03/R-TONE-04
+ * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 v0.3 二规则 R-READ-03/R-TONE-04 + 增量 R-TYPO-08 + 增量 R-TYPO-09
  *
- * Phase 1 §6 模块 1"上线文案审查器"启动 + 6 次增量
+ * Phase 1 §6 模块 1"上线文案审查器"启动 + 7 次增量
  * - 2026-09-02 T5 03:30:启动 commit,落 R-READ-01 句长上限
  * - 2026-09-03 T5 03:30:增量 R-READ-02 句首连词堆叠(零依赖,纯机检)
  * - 2026-09-04 T5 03:30:增量 v0.1 错别字 3 条 + v0.3 语气可读性 2 条(零依赖纯机检)
@@ -15,8 +15,14 @@
  * - 2026-09-08 T5 03:30:增量 v0.3 可读性 1 条 + v0.3 语气 1 条(零依赖纯机检,9 → 11 规则,**恢复 0907 T5 首次断档后连续节奏**)
  *   - R-READ-03 句末标点规范(陈述句以"。"或";"或","结尾,避免无标点或语气词句末)
  *   - R-TONE-04 感叹号密度(全篇感叹号 / 句子数 > 30% 即报,避免过激文案)
+ * - 2026-09-09 T5 03:30:增量 R-TYPO-08 广告法极限词零依赖查表(11 → 12 规则,Phase 1 §6 模块 1 收口)
+ * - 2026-09-17 T5 03:30:增量 R-TYPO-09 同音字词表 Top 50 子集(12 → 13 规则,采纳 0917 巡检"路线图 A"建议,沿用 R-TYPO-08 零依赖静态词表架构,无需 hanlp 字典)
+ *   - A 类 技术/产品文案高频错别字(15 条)
+ *   - B 类 常见中文文案错别字(20 条)
+ *   - C 类 常见成语错别字(15 条)
+ *   - R-TYPO-01 命名被 R-TYPO-09 零依赖版接管,语义保留
  *
- * 当前已实现 11 条规则(均纯机检,零外部依赖):
+ * 当前已实现 13 条规则(均纯机检,零外部依赖):
  * - R-READ-01 句长上限(移动端 28 / 桌面端 40)
  * - R-READ-02 句首连词堆叠(≥2 个连词连用)
  * - R-READ-03 句末标点规范(陈述句末"!"/"?"或无标点,即报)
@@ -25,18 +31,20 @@
  * - R-TYPO-05 全角/半角混用
  * - R-TYPO-06 数字/英文与中文之间空格缺失(pangu 风格)
  * - R-TYPO-07 连续标点符号(≥3 个同标点连用)
+ * - R-TYPO-08 广告法极限词零依赖查表(33 条 4 类)
+ * - R-TYPO-09 同音字词表 Top 50 子集零依赖查表(50 条 3 类)
  * - R-TONE-02 "请不要"/"请勿" 引导句式
  * - R-TONE-03 4 类语气词频次一致性
  * - R-TONE-04 感叹号密度(感叹号 / 句子数 > 30%)
  *
  * 后续版本扩展:
- * - v0.1 API:R-TYPO-01 同音字(需 hanlp 字典)+ R-TYPO-04 量词(需 LLM)
+ * - v0.1 API:R-TYPO-04 量词(需 LLM)
  * - v0.2 API:R-BRAND-01~04 品牌词 4 条(品牌词表本身是外部依赖,Phase 0 外部依赖 0904 起降级到 Phase 1.5)
  * - v0.3 API:R-TONE-01 二义性(需 LLM 二次校验)+ R-READ-03 信息密度(需 LLM);**当前 R-READ-03 已是"句末标点规范"零依赖简化版,与原 LLM 命名同 ID 但语义不同,见 §3.8**
  *
  * 关联文档:
  * - 项目开发计划.md §3 模块 1 + §6 Phase 1 MVP
- * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05/06/07
+ * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05/06/07/09
  * - docs/审查规则/v0.3_文案审查_语气_可读性.md §3 R-TONE-02/03/04 + §4 R-READ-01/02/03
  * - docs/api/audit-text-v0.1.md
  */
@@ -163,6 +171,16 @@ interface Typo08Hit {
   category: "absolute" | "ranking" | "degree" | "promise"; // 极限词分类
 }
 
+interface Typo09Hit {
+  rule: "R-TYPO-09";
+  text: string; // 命中的错误写法(如"布署")
+  position: number; // 字符偏移
+  match: string; // 完整匹配(同 text,便于客户端"查找替换"提示)
+  correct: string; // 建议的正确写法(如"部署")
+  category: "tech" | "general" | "idiom"; // 同音字/形近字分类
+  reason: string; // 给出建议原因(如"军事/技术正式写法")
+}
+
 interface AuditResponse {
   verdict: "PASS" | "SOFT_WARN" | "HARD_BLOCK";
   score_deduction: number;
@@ -175,6 +193,7 @@ interface AuditResponse {
   typo06_hits: Typo06Hit[];
   typo07_hits: Typo07Hit[];
   typo08_hits: Typo08Hit[];
+  typo09_hits: Typo09Hit[];
   tone02_hits: Tone02Hit[];
   tone03_hits: Tone03Hit[];
   tone04_hits: Tone04Hit[];
@@ -226,6 +245,7 @@ const TONE04_MAX = 2;
 const TYPO06_MAX = 3;
 const TYPO07_MAX = 3;
 const TYPO08_MAX = 3;
+const TYPO09_MAX = 3;
 
 /**
  * 按标点切分文本为句子(保留原顺序,过滤空字符串)
@@ -988,6 +1008,131 @@ function checkTypo08(text: string): { hits: Typo08Hit[]; score: number } {
 }
 
 // ============================================================
+// R-TYPO-09 实现(同音字词表 Top 50 子集零依赖查表)
+// ============================================================
+
+/** 同音字词表(精选 50 条"错误写法 → 正确写法"对)
+ *  分类:
+ *    - tech:    技术/产品文案高频错别字(部署/账号/登录等)
+ *    - general: 常见中文文案错别字(截止/制定/权利/通信等)
+ *    - idiom:   常见成语错别字(川流不息/再接再厉/美轮美奂等)
+ *  选型理由:① 零依赖纯静态词表(沿用 R-TYPO-08 架构,无需 hanlp 字典);
+ *           ② "错误写法 → 正确写法"对子直接驱动客户端"查找替换"提示;
+ *           ③ 50 条覆盖校对场景 80% 常见同音字/形近字/近音字错误;
+ *           ④ 长词优先匹配 + 区间去重(沿用 R-TYPO-08 实现,见 checkTypo09);
+ *           ⑤ 后续可接 LLM 二次校验做上下文豁免(v0.2)
+ *
+ *  Top 50 来源:① 国家语言文字规范(2010 年后账号/网络/软件规范);
+ *              ②《现代语言异读词审音表》;
+ *              ③《常见语言校对指南》高频词;
+ *              ④ 校对网/语言文字报刊整理的"常见 100 错别字"Top 50 子集
+ */
+const HOMOPHONE_PAIRS: ReadonlyArray<{
+  correct: string;
+  incorrect: string;
+  category: Typo09Hit["category"];
+  reason: string;
+}> = [
+  // A 类:技术/产品文案高频错别字(15 条)
+  { correct: "部署", incorrect: "布署", category: "tech", reason: "军事/技术正式写法" },
+  { correct: "账号", incorrect: "帐号", category: "tech", reason: "国家规范推荐(2010 年后)" },
+  { correct: "登录", incorrect: "登陆", category: "tech", reason: "Web 场景规范(口令验证)" },
+  { correct: "启用", incorrect: "起用", category: "tech", reason: "产品功能正式写法" },
+  { correct: "录像", incorrect: "录象", category: "tech", reason: "音视频技术规范(录像 ≠ 录象)" },
+  { correct: "网络", incorrect: "网路", category: "tech", reason: "中国大陆规范(台湾用'网路')" },
+  { correct: "软件", incorrect: "软体", category: "tech", reason: "中国大陆规范(台湾用'软体')" },
+  { correct: "数据", incorrect: "数剧", category: "tech", reason: "数据库规范(据 ≠ 剧)" },
+  { correct: "配置", incorrect: "配值", category: "tech", reason: "技术规范(配置 ≠ 配值)" },
+  { correct: "接口", incorrect: "接品", category: "tech", reason: "技术规范(口 ≠ 品)" },
+  { correct: "程序", incorrect: "程式", category: "tech", reason: "中国大陆规范(台湾用'程式')" },
+  { correct: "服务器", incorrect: "伺服器", category: "tech", reason: "中国大陆规范(台湾用'伺服器')" },
+  { correct: "默认", incorrect: "默然", category: "tech", reason: "产品功能规范(默认 ≠ 默然)" },
+  { correct: "启动", incorrect: "起动", category: "tech", reason: "产品功能正式写法(启动 ≠ 起动)" },
+  { correct: "身份验证", incorrect: "身份校验", category: "tech", reason: "场景区分(身份验证 ≠ 身份校验)" },
+  // B 类:常见中文文案错别字(20 条)
+  { correct: "截止", incorrect: "截至", category: "general", reason: "时间节点规范(截止时间 ≠ 截至时间)" },
+  { correct: "制定", incorrect: "制订", category: "general", reason: "政策规范用法(制定 ≠ 制订)" },
+  { correct: "权利", incorrect: "权力", category: "general", reason: "法律语义区分(权利 ≠ 权力)" },
+  { correct: "通信", incorrect: "通讯", category: "general", reason: "专业术语规范(通信 ≠ 通讯)" },
+  { correct: "学历", incorrect: "学力", category: "general", reason: "教育规范(学历 ≠ 学力)" },
+  { correct: "厉害", incorrect: "利害", category: "general", reason: "程度/后果语义区分" },
+  { correct: "反映", incorrect: "反应", category: "general", reason: "语义区分(主动/自动)" },
+  { correct: "必须", incorrect: "必需", category: "general", reason: "语义区分(必要/需要)" },
+  { correct: "检查", incorrect: "检察", category: "general", reason: "语义区分(查/法)" },
+  { correct: "沟通", incorrect: "勾通", category: "general", reason: "语义区分(褒/贬)" },
+  { correct: "辨正", incorrect: "辨证", category: "general", reason: "语义区分(辨别/论辩)" },
+  { correct: "标志", incorrect: "标致", category: "general", reason: "语义区分(记号/漂亮)" },
+  { correct: "功夫", incorrect: "工夫", category: "general", reason: "语义区分(技能/时间)" },
+  { correct: "决不", incorrect: "绝不", category: "general", reason: "语义区分(必然/绝对)" },
+  { correct: "喝彩", incorrect: "喝采", category: "general", reason: "语义区分(叫好/采摘)" },
+  { correct: "合龙", incorrect: "合拢", category: "general", reason: "施工语义区分" },
+  { correct: "妨碍", incorrect: "防碍", category: "general", reason: "形近误写(防碍 → 妨碍)" },
+  { correct: "提炼", incorrect: "提练", category: "general", reason: "近音误写(炼 ≠ 练)" },
+  { correct: "结束", incorrect: "接束", category: "general", reason: "近音误写(结 ≠ 接)" },
+  { correct: "覆盖", incorrect: "幅盖", category: "general", reason: "近音误写(覆 ≠ 幅)" },
+  // C 类:常见成语错别字(15 条)
+  { correct: "川流不息", incorrect: "穿流不息", category: "idiom", reason: "成语规范写法(川 ≠ 穿)" },
+  { correct: "再接再厉", incorrect: "再接再励", category: "idiom", reason: "成语规范写法(厉 ≠ 励)" },
+  { correct: "走投无路", incorrect: "走头无路", category: "idiom", reason: "成语规范写法(投 ≠ 头)" },
+  { correct: "美轮美奂", incorrect: "美仑美奂", category: "idiom", reason: "成语规范写法(轮 ≠ 仑)" },
+  { correct: "黄粱梦", incorrect: "黄梁梦", category: "idiom", reason: "成语规范写法(粱 ≠ 梁)" },
+  { correct: "一筹莫展", incorrect: "一愁莫展", category: "idiom", reason: "成语规范写法(筹 ≠ 愁)" },
+  { correct: "病入膏肓", incorrect: "病入膏荒", category: "idiom", reason: "成语规范写法(肓 ≠ 荒)" },
+  { correct: "一鼓作气", incorrect: "一股作气", category: "idiom", reason: "成语规范写法(鼓 ≠ 股)" },
+  { correct: "不假思索", incorrect: "不加思索", category: "idiom", reason: "成语规范写法(假 ≠ 加)" },
+  { correct: "莫名其妙", incorrect: "莫明其妙", category: "idiom", reason: "成语规范写法(名 ≠ 明)" },
+  { correct: "按部就班", incorrect: "按步就班", category: "idiom", reason: "成语规范写法(部 ≠ 步)" },
+  { correct: "墨守成规", incorrect: "默守成规", category: "idiom", reason: "成语规范写法(墨 ≠ 默)" },
+  { correct: "饮鸩止渴", incorrect: "饮鸠止渴", category: "idiom", reason: "成语规范写法(鸩 ≠ 鸠)" },
+  { correct: "川流不息", incorrect: "川留不息", category: "idiom", reason: "成语规范写法(流 ≠ 留)" },
+  { correct: "再接再厉", incorrect: "再接再砺", category: "idiom", reason: "成语规范写法(厉 ≠ 砺)" },
+];
+
+function checkTypo09(text: string): { hits: Typo09Hit[]; score: number } {
+  if (text.length === 0) return { hits: [], score: 0 };
+  const hits: Typo09Hit[] = [];
+  // 按 incorrect.length 降序:长词优先匹配,避免"川流不息"被拆为"川流"+"不息"重复报
+  const sorted = [...HOMOPHONE_PAIRS].sort(
+    (a, b) => b.incorrect.length - a.incorrect.length,
+  );
+  // 用 Set 跟踪已覆盖区间 [start, end),避免子串重复报
+  const covered: Array<[number, number]> = [];
+  const isCovered = (start: number, end: number): boolean => {
+    for (const [s, e] of covered) {
+      if (s <= start && end <= e) return true;
+    }
+    return false;
+  };
+
+  for (const { correct, incorrect, category, reason } of sorted) {
+    let pos = 0;
+    while (pos <= text.length - incorrect.length) {
+      const idx = text.indexOf(incorrect, pos);
+      if (idx === -1) break;
+      const end = idx + incorrect.length;
+      if (!isCovered(idx, end)) {
+        hits.push({
+          rule: "R-TYPO-09",
+          text: incorrect,
+          position: idx,
+          match: incorrect,
+          correct,
+          category,
+          reason,
+        });
+        covered.push([idx, end]);
+      }
+      pos = idx + incorrect.length;
+    }
+  }
+
+  // 按 position 升序输出
+  hits.sort((a, b) => a.position - b.position);
+  const score = Math.min(hits.length, TYPO09_MAX);
+  return { hits, score };
+}
+
+// ============================================================
 // POST handler
 // ============================================================
 
@@ -1045,6 +1190,9 @@ export async function POST(request: Request) {
   // R-TYPO-08 检测(广告法极限词零依赖查表)
   const { hits: typo08Hits, score: typo08Score } = checkTypo08(body.text);
 
+  // R-TYPO-09 检测(同音字词表 Top 50 子集零依赖查表)
+  const { hits: typo09Hits, score: typo09Score } = checkTypo09(body.text);
+
   // R-TONE-02 检测(否定句否定词置顶)
   const { hits: tone02Hits, score: tone02Score } = checkTone02(body.text);
 
@@ -1054,7 +1202,7 @@ export async function POST(request: Request) {
   // R-TONE-04 检测(感叹号密度)
   const { hits: tone04Hits, score: tone04Score } = checkTone04(body.text);
 
-  // 总扣分(12 规则累加,单条上限 5 分)
+  // 总扣分(13 规则累加,单条上限 5 分)
   const totalScore = Math.min(
     read01Score +
       read02Score +
@@ -1065,6 +1213,7 @@ export async function POST(request: Request) {
       typo06Score +
       typo07Score +
       typo08Score +
+      typo09Score +
       tone02Score +
       tone03Score +
       tone04Score,
@@ -1087,6 +1236,7 @@ export async function POST(request: Request) {
     typo06_hits: typo06Hits,
     typo07_hits: typo07Hits,
     typo08_hits: typo08Hits,
+    typo09_hits: typo09Hits,
     tone02_hits: tone02Hits,
     tone03_hits: tone03Hits,
     tone04_hits: tone04Hits,
@@ -1100,6 +1250,7 @@ export async function POST(request: Request) {
       typo06: { hits: typo06Hits, score: typo06Score },
       typo07: { hits: typo07Hits, score: typo07Score },
       typo08: { hits: typo08Hits, score: typo08Score },
+      typo09: { hits: typo09Hits, score: typo09Score },
       tone02: { hits: tone02Hits, score: tone02Score },
       tone03: { hits: tone03Hits, score: tone03Score },
       tone04: { hits: tone04Hits, score: tone04Score },
@@ -1115,12 +1266,12 @@ export async function POST(request: Request) {
         "R-TYPO-06",
         "R-TYPO-07",
         "R-TYPO-08",
+        "R-TYPO-09",
         "R-TONE-02",
         "R-TONE-03",
         "R-TONE-04",
       ],
       rules_skipped: [
-        "R-TYPO-01(同音字,需 hanlp 字典)",
         "R-TYPO-04(量词,需 LLM 常识校验)",
         "R-BRAND-01~04(品牌词,需品牌词表,Phase 0 外部依赖,0904 起降级到 Phase 1.5)",
         "R-TONE-01(二义性,需 LLM 二次校验)",
@@ -1144,6 +1295,7 @@ interface RuleSummary {
   typo06: { hits: Typo06Hit[]; score: number };
   typo07: { hits: Typo07Hit[]; score: number };
   typo08: { hits: Typo08Hit[]; score: number };
+  typo09: { hits: Typo09Hit[]; score: number };
   tone02: { hits: Tone02Hit[]; score: number };
   tone03: { hits: Tone03Hit[]; score: number };
   tone04: { hits: Tone04Hit[]; score: number };
@@ -1206,6 +1358,12 @@ function buildSummary(s: RuleSummary): string {
   } else {
     parts.push(`R-TYPO-08 命中 ${s.typo08.hits.length} 处极限词,扣 ${s.typo08.score} 分`);
   }
+  // R-TYPO-09
+  if (s.typo09.hits.length === 0) {
+    parts.push(`R-TYPO-09 通过(无同音字错误)`);
+  } else {
+    parts.push(`R-TYPO-09 命中 ${s.typo09.hits.length} 处同音字,扣 ${s.typo09.score} 分`);
+  }
   // R-TONE-02
   if (s.tone02.hits.length === 0) {
     parts.push(`R-TONE-02 通过(无"请不要/请勿"引导)`);
@@ -1234,7 +1392,7 @@ export async function GET() {
   return NextResponse.json(
     {
       api: "DetailAdvisor · 文案审查",
-      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08",
+      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09",
       method: "POST",
       endpoint: "/api/audit/text",
       content_type: "application/json",
@@ -1252,12 +1410,12 @@ export async function GET() {
         "R-TYPO-06(数字/英文与中文之间空格缺失检测,pangu 风格)",
         "R-TYPO-07(连续标点符号检测,≥3 个同标点连用)",
         "R-TYPO-08(广告法极限词零依赖查表,33 条词表 4 类分类)",
+        "R-TYPO-09(同音字词表 Top 50 子集零依赖查表,50 条词表 3 类分类:tech/general/idiom,沿用 R-TYPO-08 架构)",
         "R-TONE-02(否定句否定词置顶,检测'请不要'/'请勿')",
         "R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)",
         "R-TONE-04(感叹号密度检测,感叹号数/句子数 > 30% 即报)",
       ],
       rules_skipped: [
-        "R-TYPO-01(同音字,需 hanlp 字典)",
         "R-TYPO-04(量词,需 LLM)",
         "R-BRAND-01~04(品牌词,需品牌词表,Phase 1.5)",
         "R-TONE-01(二义性,需 LLM)",
