@@ -30,14 +30,23 @@
  *   - SC-P-07 密码强度/账号安全策略(permission, medium, PRD 关键词"登录/注册/密码/账号/策略")
  *   - 严重度分布更新:critical 3 / high 16 / medium 15 / low 6 = 42 条;high+critical 19 条(45.2%)
  *   - PRD_KEYWORD_DICT 词典 5 组关键词(支付/登录注册/异步/网关/合规)→ 5 条子场景;prd 字段从 v0.1"仅记录不解析"升级为 v0.2"扫描关键词追加子场景"
+ * - 2026-09-18 T5 03:30:启动 v0.2.1 PRD 关键词上下文豁免 + PRD 多关键词权重排序
+ *   - PRD_BRAND_EXEMPT_DICT 词典:5 条 v0.2 子场景按场景定义品牌白名单(SC-B-12 支付金额边界 / SC-N-08 网关超时 / SC-C-08 队列堆积 / SC-P-07 密码策略 / SC-B-13 账号锁定)
+ *   - 上下文豁免规则:当 prd 文本出现品牌白名单词 + 该品牌词与 v0.2 关键词距离 ≤ 20 字符时,视为"品牌使用"而非"场景触发",豁免该子场景
+ *     例:"产品支持支付宝支付,完成订单后会跳转支付宝网关" → "支付宝"与"支付"距离近,SC-B-12 豁免,SC-N-08 网关仍然命中
+ *   - 多关键词权重排序:同一 prd 命中多条 v0.2 子场景时,按每个子场景"实际命中关键词数"降序排序,命中越多越靠前
+ *   - 不做 LLM 二次校验,v0.3 才接 Claude Sonnet 4.5;PRDBRANDEXEMPT 是零依赖纯字符串距离检测
+ *   - filterScenarios 返回值增加 prd_exempted_scenarios(被豁免的 v0.2 子场景 ID)+ keyword_hit_counts(每个命中子场景的关键词命中数 Record)
+ *   - meta.filter_mode 增加 "prd-exempted" 取值(部分命中被豁免)
  *
- * 设计思路(v0.2 PRD 关键词深度匹配 雏形):
+ * 设计思路(v0.2 PRD 关键词深度匹配 + v0.2.1 上下文豁免/权重排序):
  * - v0.1 基础 37 条保留不变;v0.2 新增 5 条 v0.2 子场景(SCENARIO_LIBRARY_V02_PRD)按 PRD 关键词命中追加
+ * - v0.2.1 在 v0.2 基础上增加 2 个增强:上下文豁免(避免品牌误触发)+ 多关键词权重排序(命中强度优先)
  * - PRD_KEYWORD_DICT 是零依赖静态关键词词典(5 组关键词 → 5 条子场景),prd 文本 lowercase + includes 扫描
- * - 不做 LLM 二次校验,只做关键词命中 → 子场景追加;v0.3 可接 Claude Sonnet 4.5 做"场景是否真实存在"的二次校验
- * - filterScenarios 返回值增加 prd_matched_scenarios(命中的 v0.2 子场景)+ prd_keywords_matched(命中的关键词)
+ * - 不做 LLM 二次校验,只做关键词命中/豁免/权重 → 子场景追加;v0.3 可接 Claude Sonnet 4.5 做"场景是否真实存在"的二次校验
+ * - filterScenarios 返回值增加 prd_matched_scenarios(命中的 v0.2 子场景)+ prd_keywords_matched(命中的关键词)+ prd_exempted_scenarios(被豁免的子场景)+ keyword_hit_counts(权重)
  * - 5 类主库 37 条 + 5 条 v0.2 子场景 = 42 条,v0.2 不改 SCENARIO_LIBRARY 主库顺序,只追加子场景
- * - meta.filter_mode 增加 "prd" 取值(纯 PRD 命中,无 feature 关键词)
+ * - meta.filter_mode 增加 "prd" 取值(纯 PRD 命中,无 feature 关键词)+ "prd-exempted" 取值(部分命中被豁免)
  *
  * 接口:
  * - POST /api/audit/scenarios
@@ -90,10 +99,12 @@ interface ScenariosResponse {
     feature_keywords_matched: string[];
     prd_keywords_matched: string[]; // v0.2 新增:PRD 文本命中的关键词
     prd_matched_scenarios: string[]; // v0.2 新增:命中的 v0.2 子场景 ID 列表
+    prd_exempted_scenarios: string[]; // v0.2.1 新增:被品牌白名单豁免的 v0.2 子场景 ID 列表
+    keyword_hit_counts: Record<string, number>; // v0.2.1 新增:每个命中 v0.2 子场景的关键词命中数(权重排序依据)
     categories_requested: Category[];
     categories_returned: Category[];
     scenarios_per_category: Record<Category, number>;
-    filter_mode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd";
+    filter_mode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd" | "prd-exempted" | "keyword+prd-exempted" | "category+prd-exempted";
   };
 }
 
@@ -592,6 +603,30 @@ const SCENARIO_LIBRARY_V02_PRD: Scenario[] = [
   },
 ];
 
+// ============================================================
+// v0.2.1 PRD 关键词上下文豁免 品牌白名单
+// 2026-09-18 T5 启动:按 v0.2 子场景定义品牌白名单;brand 与 v0.2 关键词距离 ≤ 20 字符视为"品牌使用"而非"场景触发"
+// 空数组 = 该子场景不豁免(总是适用)
+// 仅 SC-B-12 (支付金额边界) 需要品牌豁免(支付品牌词常用作主语);其他场景关键词与技术触发强相关,不豁免
+// ============================================================
+
+const PRD_BRAND_EXEMPT_DICT: Record<string, string[]> = {
+  // SC-B-12 支付金额边界:支付品牌作主语时不算"金额边界触发"
+  // 例:"我们集成支付宝作为支付渠道,用户可以选择支付宝支付订单" → "支付宝"品牌作主语,SC-B-12 豁免
+  "SC-B-12": ["支付宝", "微信支付", "paypal", "stripe", "apple pay", "google pay"],
+  // SC-N-08 支付网关超时:网关总是技术触发,不豁免(网关是底层组件,品牌说支付仍涉及网关)
+  "SC-N-08": [],
+  // SC-C-08 消息队列堆积:队列总是技术触发(品牌名不会出现)
+  "SC-C-08": [],
+  // SC-P-07 密码强度策略:密码策略总是适用
+  "SC-P-07": [],
+  // SC-B-13 账号锁定:账号锁定总是适用
+  "SC-B-13": [],
+};
+
+/** 上下文豁免距离阈值(字符数,中文按 1 字 1 字符计算);按 PRD 中 brand 与 keyword 的最近绝对距离 */
+const PRD_EXEMPT_DISTANCE = 20;
+
 const CATEGORY_LABEL: Record<Category, string> = {
   boundary: "边界值",
   concurrency: "并发",
@@ -600,13 +635,13 @@ const CATEGORY_LABEL: Record<Category, string> = {
   device: "设备",
 };
 
-const API_VERSION = "0.2.0-API-雏形+7-触发类型库扩展+2-财务微服务+PRD关键词深度匹配";
+const API_VERSION = "0.2.1-API-雏形+7-触发类型库扩展+2-财务微服务+PRD关键词深度匹配+PRD上下文豁免+PRD多关键词权重排序";
 
 // ============================================================
 // 工具函数
 // ============================================================
 
-/** 按 feature 关键词 + 可选 categories 过滤场景库 + v0.2 PRD 关键词深度匹配 */
+/** 按 feature 关键词 + 可选 categories 过滤场景库 + v0.2 PRD 关键词深度匹配 + v0.2.1 上下文豁免/权重排序 */
 function filterScenarios(
   feature: string,
   categories?: Category[],
@@ -616,7 +651,9 @@ function filterScenarios(
   matchedKeywords: string[];
   prdMatchedScenarios: Scenario[];
   prdKeywordsMatched: string[];
-  filterMode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd";
+  prdExemptedScenarios: string[]; // v0.2.1 新增:被品牌白名单豁免的 v0.2 子场景 ID
+  keywordHitCounts: Record<string, number>; // v0.2.1 新增:每个命中 v0.2 子场景的关键词命中数(权重排序依据)
+  filterMode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd" | "prd-exempted" | "keyword+prd-exempted" | "category+prd-exempted";
 } {
   const lowerFeature = feature.toLowerCase().trim();
 
@@ -639,43 +676,75 @@ function filterScenarios(
     }
   }
 
-  // v0.2 PRD 关键词深度匹配:扫描 prd 文本,命中 v0.2 子场景关键词 → 追加到结果列表
+  // v0.2 PRD 关键词深度匹配 + v0.2.1 上下文豁免 + 多关键词权重
   const prdMatchedScenarios: Scenario[] = [];
   const prdKeywordsMatched: string[] = [];
+  const prdExemptedScenarios: string[] = [];
+  const keywordHitCounts: Record<string, number> = {};
   if (typeof prd === "string" && prd.trim() !== "") {
     const lowerPrd = prd.toLowerCase().trim();
     const matchedIds = new Set<string>();
+
     for (const s of SCENARIO_LIBRARY_V02_PRD) {
-      // v0.2 子场景关键词命中(任一关键词命中即追加该子场景,按 ID 去重)
+      let hitCount = 0;
+      let isExempted = false;
+      const brands = PRD_BRAND_EXEMPT_DICT[s.id] || [];
       for (const kw of s.keywords) {
         if (lowerPrd.includes(kw.toLowerCase())) {
-          matchedIds.add(s.id);
+          // v0.2.1 上下文豁免: 如果该子场景定义了品牌白名单, 检查 brand 与 kw 距离
+          if (brands.length > 0) {
+            for (const brand of brands) {
+              const brandIdx = lowerPrd.indexOf(brand.toLowerCase());
+              const kwIdx = lowerPrd.indexOf(kw.toLowerCase());
+              if (brandIdx !== -1 && kwIdx !== -1 && Math.abs(brandIdx - kwIdx) <= PRD_EXEMPT_DISTANCE) {
+                isExempted = true;
+                break;
+              }
+            }
+          }
+          if (isExempted) break; // 豁免: 不计入 hitCount, 不追加到结果
+          hitCount += 1;
           if (!prdKeywordsMatched.includes(kw)) {
             prdKeywordsMatched.push(kw);
           }
-          break; // 一条子场景命中一次即可
         }
+      }
+      if (isExempted) {
+        if (!prdExemptedScenarios.includes(s.id)) {
+          prdExemptedScenarios.push(s.id);
+        }
+        continue; // 跳过该子场景,不追加
+      }
+      if (hitCount > 0) {
+        matchedIds.add(s.id);
+        keywordHitCounts[s.id] = hitCount;
       }
     }
-    for (const s of SCENARIO_LIBRARY_V02_PRD) {
-      if (matchedIds.has(s.id)) {
-        // 类别过滤时也按 categories 限定 v0.2 子场景
-        if (categories && categories.length > 0 && !categories.includes(s.category)) {
-          continue;
-        }
-        prdMatchedScenarios.push(s);
+
+    // 按 hitCount 降序排序(多关键词权重排序 v0.2.1)
+    const sortedScenarios = [...SCENARIO_LIBRARY_V02_PRD]
+      .filter((s) => matchedIds.has(s.id))
+      .sort((a, b) => (keywordHitCounts[b.id] || 0) - (keywordHitCounts[a.id] || 0));
+    for (const s of sortedScenarios) {
+      // 类别过滤时也按 categories 限定 v0.2 子场景
+      if (categories && categories.length > 0 && !categories.includes(s.category)) {
+        continue;
       }
+      prdMatchedScenarios.push(s);
     }
   }
 
   // v0.1 雏形:有类别过滤就过滤,无类别就全清单;关键词仅记录不剔除
   // v0.2 增强:PRD 命中追加 v0.2 子场景(去重),filter_mode 增加 prd 维度
+  // v0.2.1 增强:filter_mode 增加 prd-exempted 维度(部分命中被豁免)
   const baseMode: "all" | "category" | "keyword" = matchedKeywords.length > 0 && filterMode === "all" ? "keyword" : filterMode;
-  let combinedMode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd" = baseMode;
-  if (prdMatchedScenarios.length > 0) {
-    if (baseMode === "keyword") combinedMode = "keyword+prd";
-    else if (baseMode === "category") combinedMode = "category+prd";
-    else if (baseMode === "all") combinedMode = "prd";
+  let combinedMode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd" | "prd-exempted" | "keyword+prd-exempted" | "category+prd-exempted" = baseMode;
+  const hasPrdActivity = prdMatchedScenarios.length > 0 || prdExemptedScenarios.length > 0;
+  if (hasPrdActivity) {
+    const exemptedSuffix = prdExemptedScenarios.length > 0 ? "-exempted" : "";
+    if (baseMode === "keyword") combinedMode = `keyword+prd${exemptedSuffix}` as typeof combinedMode;
+    else if (baseMode === "category") combinedMode = `category+prd${exemptedSuffix}` as typeof combinedMode;
+    else if (baseMode === "all") combinedMode = `prd${exemptedSuffix}` as typeof combinedMode;
   }
 
   return {
@@ -683,6 +752,8 @@ function filterScenarios(
     matchedKeywords,
     prdMatchedScenarios,
     prdKeywordsMatched,
+    prdExemptedScenarios,
+    keywordHitCounts,
     filterMode: combinedMode,
   };
 }
@@ -833,12 +904,14 @@ export async function POST(request: Request) {
 
   const requestedCategories = body.categories && body.categories.length > 0 ? body.categories : validCategories;
 
-  // 3. 过滤场景(v0.2 prd 字段真正参与匹配,追加 v0.2 子场景到 grouped)
+  // 3. 过滤场景(v0.2 prd 字段真正参与匹配,追加 v0.2 子场景到 grouped;v0.2.1 上下文豁免 + 多关键词权重排序)
   const {
     filtered,
     matchedKeywords,
     prdMatchedScenarios,
     prdKeywordsMatched,
+    prdExemptedScenarios,
+    keywordHitCounts,
     filterMode,
   } = filterScenarios(body.feature, body.categories, body.prd);
 
@@ -866,6 +939,8 @@ export async function POST(request: Request) {
       feature_keywords_matched: matchedKeywords,
       prd_keywords_matched: prdKeywordsMatched,
       prd_matched_scenarios: prdMatchedScenarios.map((s) => s.id),
+      prd_exempted_scenarios: prdExemptedScenarios, // v0.2.1 新增
+      keyword_hit_counts: keywordHitCounts, // v0.2.1 新增(多关键词权重排序依据)
       categories_requested: requestedCategories,
       categories_returned: requestedCategories,
       scenarios_per_category: {
@@ -907,17 +982,17 @@ export async function GET() {
       content_type: "application/json",
       request_shape: {
         feature: "string (required, ≤ 200 字符,功能名)",
-        prd: "string (optional,产品需求描述,v0.2 升级:扫描关键词命中 v0.2 子场景库 5 条;v0.1 仅记录不解析)",
+        prd: "string (optional,产品需求描述,v0.2 升级:扫描关键词命中 v0.2 子场景库 5 条;v0.2.1 升级:品牌白名单上下文豁免 + 多关键词权重排序;v0.1 仅记录不解析)",
         categories:
           "boundary | concurrency | network | permission | device[] (optional,默认全 5 类)",
       },
       response_shape: {
         feature: "string (回传)",
-        total_scenarios: "number (37 主库 + N v0.2 子场景)",
-        by_category: "Record<5 类, Scenario[]> 每类 0-N 条(含 v0.2 子场景)",
+        total_scenarios: "number (37 主库 + N v0.2 子场景,v0.2.1 已豁免的子场景不计)",
+        by_category: "Record<5 类, Scenario[]> 每类 0-N 条(含 v0.2 子场景,v0.2.1 已按 hit_count 降序排列)",
         score_complexity: "1 | 2 | 3 | 4 | 5 (基于返回场景数 + 命中类别数)",
         summary: "string (拼装中文摘要,v0.2 含 PRD 命中子场景数)",
-        meta: "元信息(版本/feature 关键词命中/PRD 关键词命中/PRD 命中 v0.2 子场景 ID/categories/scenarios_per_category/filter_mode)",
+        meta: "元信息(版本/feature 关键词命中/PRD 关键词命中/PRD 命中 v0.2 子场景 ID/PRD 被豁免子场景 ID(v0.2.1)/keyword_hit_counts(v0.2.1)/categories/scenarios_per_category/filter_mode)",
       },
       categories_implemented: [
         { id: "boundary", label: "边界值", count: scenariosPerCategory.boundary },
@@ -945,16 +1020,19 @@ export async function GET() {
         "prd(PRD 文本命中 v0.2 子场景)",
         "keyword+prd(feature + PRD 双命中)",
         "category+prd(类别过滤 + PRD 命中)",
+        "prd-exempted(PRD 部分命中被品牌白名单豁免)",
+        "keyword+prd-exempted(feature + PRD 部分命中被豁免)",
+        "category+prd-exempted(类别过滤 + PRD 部分命中被豁免)",
       ],
       rules_skipped: [
-        "PRD 关键词上下文豁免(v0.2.1 计划,如'支付宝'作为支付品牌不算支付场景)",
-        "PRD 多关键词权重排序(v0.2.1 计划,目前仅命中即追加)",
+        "PRD 关键词上下文豁免(v0.2.1 已落:PRD_BRAND_EXEMPT_DICT 5 子场景品牌白名单 + 距离 ≤ 20 字符豁免规则)",
+        "PRD 多关键词权重排序(v0.2.1 已落:每个 v0.2 子场景按 hit_count 降序排序,响应 meta.keyword_hit_counts)",
         "LLM 二次校验(v0.3 计划,接 Claude Sonnet 4.5 做'场景是否真实存在'校验)",
         "R-SCENE-01~99 子规则细分(目前 42 条为顶层场景,0912 T5 已扩 7 条,0914 T5 再扩 2 条,0915 T5 再扩 5 条 v0.2 PRD 子场景)",
       ],
       docs: "docs/api/audit-scenarios-v0.2.md",
       related_apis: [
-        { name: "文案审查器", endpoint: "/api/audit/text", version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08" },
+        { name: "文案审查器", endpoint: "/api/audit/text", version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09" },
       ],
     },
     { status: 200 },
