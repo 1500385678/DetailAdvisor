@@ -1,14 +1,16 @@
 # 异常场景发现器 API · v0.2 PRD 关键词深度匹配 雏形
 
-> DetailAdvisor 模块 3(异常场景发现器)后端 API · v0.2 雏形 · 2026-09-10(启动) / 2026-09-12(增量扩展) / 2026-09-14(再增量) / 2026-09-15(v0.2 PRD 关键词深度匹配启动)
+> DetailAdvisor 模块 3(异常场景发现器)后端 API · v0.2 雏形 · 2026-09-10(启动) / 2026-09-12(增量扩展) / 2026-09-14(再增量) / 2026-09-15(v0.2 PRD 关键词深度匹配启动) / 2026-09-18(v0.2.1 上下文豁免 + 多关键词权重排序) / 2026-09-19(v0.2.2 权重排序可视化 + 日志输出增强)
 > 落地 commit:
 > - 0910 T5 03:30:启动 commit,落 5 类异常场景库(零依赖纯模板,Phase 1 §6 收口后第一个非文案模块)
 > - 0912 T5 03:30:增量 7 条触发类型库扩展(28 → 35 条,5 类各扩 1-2 条;v0.1 雏形语义不变,v0.2 计划仍接 PRD 关键词深度匹配)
 > - 0914 T5 03:30:增量 2 条财务/微服务场景(35 → 37 条;延续 0910-0912 触发类型库扩展路径,0913 断档后 0914 恢复连续节奏)
 > - **0915 T5 03:30:启动 v0.2 PRD 关键词深度匹配 雏形(37 → 42 条,新增 5 条 v0.2 子场景 + PRD_KEYWORD_DICT 静态关键词词典 + prd 字段真正参与场景匹配;v0.1 feature 关键词命中语义不变,v0.2 仅增强"按 PRD 文本追加行业子场景",采纳 0915 巡检"特别建议路线图 B'"决策,无 plan 临时决策模式第 15 天延续)**
+> - **0918 T5 03:30:启动 v0.2.1 PRD 关键词上下文豁免 + 多关键词权重排序(42 条场景库不变,零依赖纯字符串距离检测 + hit_count 降序排序;PRD_BRAND_EXEMPT_DICT 5 子场景品牌白名单 + 距离 ≤ 20 字符豁免规则;meta 新增 prd_exempted_scenarios + keyword_hit_counts 2 字段,filter_mode 扩 3 档 prd-exempted 复合形态,采纳 0918 巡检"特别建议路线图 D"决策)**
+> - **0919 T5 03:30:启动 v0.2.2 PRD 多关键词权重排序可视化与日志输出增强(42 条场景库仍不变;meta 新增 3 字段 `prd_weighted_top_scenario`(命中权重最高 v0.2 子场景 ID)+ `prd_weight_distribution`(权重分布 `Record<hit_count, count>`)+ `prd_keyword_density`(命中率 0-1 数字);POST handler 内 console.log 一行汇总日志,便于 dogfood 调试 + 上线后观察命中分布;零依赖纯 JS 计算 + Node 原生 console.log,沿用 v0.2/v0.2.1 架构;采纳 0919 巡检"特别建议路线图 D'"决策,无 plan 临时决策模式第 21 天延续)**
 > 入口: `app/api/audit/scenarios/route.ts`(Next.js 16 App Router Route Handler)
 > 历史文档: `docs/api/audit-scenarios-v0.1.md`(v0.1 37 条版本)
-> 决策依据:0908 T5 巡检建议"12 规则已收口,0910+ 可启动异常场景发现器";0912 巡检"特别建议路线图 B(audit-scenarios 触发类型库扩展)";0914 巡检"最高优:兑现 1 项轻量交付 + 2 项主计划修改合并同次 commit";0915 巡检"特别建议路线图 B'(audit-scenarios v0.2 PRD 关键词深度匹配)";无 plan 临时决策模式第 11/13/14/15 天延续
+> 决策依据:0908 T5 巡检建议"12 规则已收口,0910+ 可启动异常场景发现器";0912 巡检"特别建议路线图 B(audit-scenarios 触发类型库扩展)";0914 巡检"最高优:兑现 1 项轻量交付 + 2 项主计划修改合并同次 commit";0915 巡检"特别建议路线图 B'(audit-scenarios v0.2 PRD 关键词深度匹配)";0918 巡检"特别建议路线图 D(audit-scenarios v0.2.1 PRD 关键词上下文豁免)";0919 巡检"特别建议路线图 D'(audit-scenarios v0.2.2 PRD 多关键词权重排序可视化与日志输出增强)";无 plan 临时决策模式第 11/13/14/15/20/21 天延续
 
 ---
 
@@ -16,8 +18,8 @@
 
 | 项 | 说明 |
 |----|------|
-| 当前已实现 | **5 类异常场景库 + v0.2 PRD 关键词深度匹配**(零依赖纯模板,**42 条场景(0910 启动 28 + 0912 +7 + 0914 +2 + 0915 +5 v0.2 子场景)**,2026-09-15 T5 启动 v0.2 PRD 关键词深度匹配 雏形):**boundary**(边界值,13 条:11 主库 + 2 v0.2)+ **concurrency**(并发,8 条:7 主库 + 1 v0.2)+ **network**(网络,8 条:7 主库 + 1 v0.2)+ **permission**(权限,7 条:6 主库 + 1 v0.2)+ **device**(设备,6 条主库,v0.2 未扩);v0.2 子场景由 PRD_KEYWORD_DICT 静态关键词词典触发,prd 字段从 v0.1"仅记录不解析"升级为 v0.2"扫描关键词命中追加子场景",filter_mode 增加 3 档(prd / keyword+prd / category+prd) |
-| 暂未实现 | PRD 关键词上下文豁免(v0.2.1 计划,如"支付宝"作为支付品牌不算支付场景)/ PRD 多关键词权重排序(v0.2.1 计划,目前仅命中即追加)/ LLM 二次校验(v0.3 计划,接 Claude Sonnet 4.5 做"场景是否真实存在"校验)/ R-SCENE-01~99 子规则细分(0912 T5 已扩 7 条,0914 T5 再扩 2 条,0915 T5 再扩 5 条 v0.2 PRD 子场景) |
+| 当前已实现 | **5 类异常场景库 + v0.2 PRD 关键词深度匹配 + v0.2.1 上下文豁免 + 多关键词权重排序 + v0.2.2 权重排序可视化 + 日志输出增强**(零依赖纯模板,**42 条场景(0910 启动 28 + 0912 +7 + 0914 +2 + 0915 +5 v0.2 子场景,后续 0918 v0.2.1 与 0919 v0.2.2 增量扩展不增不减场景库)**,2026-09-19 T5 启动 v0.2.2 权重排序可视化与日志输出增强 雏形):**boundary**(边界值,13 条:11 主库 + 2 v0.2)+ **concurrency**(并发,8 条:7 主库 + 1 v0.2)+ **network**(网络,8 条:7 主库 + 1 v0.2)+ **permission**(权限,7 条:6 主库 + 1 v0.2)+ **device**(设备,6 条主库,v0.2 未扩);v0.2 子场景由 PRD_KEYWORD_DICT 静态关键词词典触发,prd 字段从 v0.1"仅记录不解析"升级为 v0.2"扫描关键词命中追加子场景",filter_mode 增加 3 档(prd / keyword+prd / category+prd);v0.2.1 增加 PRD_BRAND_EXEMPT_DICT 5 子场景品牌白名单 + 距离 ≤ 20 字符豁免规则 + 多关键词权重排序(meta 新增 prd_exempted_scenarios + keyword_hit_counts 2 字段,filter_mode 扩 3 档 prd-exempted 复合形态);v0.2.2 增加 meta 3 字段(prd_weighted_top_scenario + prd_weight_distribution + prd_keyword_density) + POST handler 内 console.log 一行汇总日志 |
+| 暂未实现 | LLM 二次校验(v0.3 计划,接 Claude Sonnet 4.5 做"场景是否真实存在"校验)/ R-SCENE-01~99 子规则细分(0912 T5 已扩 7 条,0914 T5 再扩 2 条,0915 T5 再扩 5 条 v0.2 PRD 子场景) |
 | 关联规则 | `docs/异常场景/v0.2_异常场景_5类清单.md` |
 
 ---
@@ -254,6 +256,58 @@ curl -sS -X POST http://localhost:3000/api/audit/scenarios \
 
 ---
 
+### 5.8 v0.2.2 用例(0919 T5 增量)
+
+#### 5.8.1 T1 GET 元信息(v0.2.2 版本)
+
+```bash
+curl -sS http://localhost:3000/api/audit/scenarios
+```
+
+预期:返回 `version=0.2.2-...+权重排序可视化+日志输出增强`,`rules_skipped` 中删除"PRD 多关键词权重排序可视化与日志输出增强(v0.2.2 计划)"项(改"v0.2.2 已落"),其余项保持 v0.2.1 状态。
+
+#### 5.8.2 T2 PRD 多关键词权重可视化(2 命中场景)
+
+```bash
+curl -sS -X POST http://localhost:3000/api/audit/scenarios \
+  -H "Content-Type: application/json" \
+  -d '{"feature":"下单支付","prd":"用户用支付方式付款完成订单,支付网关处理订单退款并通过 webhook 回调通知"}'
+```
+
+预期:`prd_matched_scenarios=["SC-N-08","SC-B-12"]`(SC-N-08 hit_count=4 排前,SC-B-12 hit_count=3 排后,沿用 v0.2.1 排序)+ **v0.2.2 新字段**`prd_weighted_top_scenario="SC-N-08"`(权重最高者)+ `prd_weight_distribution={"3":1,"4":1}`(hit_count=3 的 1 条,hit_count=4 的 1 条)+ `prd_keyword_density=0.4`(2 条命中 / 5 条 v0.2 子场景 = 0.4);POST handler 内 `console.log` 输出 1 行 `[audit-scenarios v0.2.2] feature="下单支付" prd_len=... prd_scenarios=2 prd_keywords=... top=SC-N-08(hit=4) density=0.4 exempted=none`。
+
+#### 5.8.3 T3 PRD 单命中权重可视化(1 命中场景)
+
+```bash
+curl -sS -X POST http://localhost:3000/api/audit/scenarios \
+  -H "Content-Type: application/json" \
+  -d '{"feature":"异步消息","prd":"系统用 Kafka 消息队列异步推送事件给消费者"}'
+```
+
+预期:`prd_matched_scenarios=["SC-C-08"]` + `prd_weighted_top_scenario="SC-C-08"` + `prd_weight_distribution={"N":1}`(命中关键词数 N ∈ [1,7])+ `prd_keyword_density=0.2`(1 / 5 = 0.2);console.log 输出 1 行。
+
+#### 5.8.4 T4 PRD 不命中权重可视化(0 命中)
+
+```bash
+curl -sS -X POST http://localhost:3000/api/audit/scenarios \
+  -H "Content-Type: application/json" \
+  -d '{"feature":"天气预报","prd":"用户输入城市名,查询 7 天天气数据"}'
+```
+
+预期:`prd_matched_scenarios=[]` + **v0.2.2 新字段**`prd_weighted_top_scenario=null`(无命中)+ `prd_weight_distribution={}`(空对象)+ `prd_keyword_density=0`(0 / 5 = 0);console.log 不输出(prdMatchedScenarios.length === 0 时跳过)。
+
+#### 5.8.5 T5 PRD 命中 + 品牌豁免权重可视化(完整流程)
+
+```bash
+curl -sS -X POST http://localhost:3000/api/audit/scenarios \
+  -H "Content-Type: application/json" \
+  -d '{"feature":"集成支付","prd":"我们集成支付宝作为支付渠道,完成订单后会跳转支付宝网关"}'
+```
+
+预期:`prd_matched_scenarios=["SC-N-08"]`(`SC-B-12` 被"支付宝"品牌豁免)+ `prd_exempted_scenarios=["SC-B-12"]` + `keyword_hit_counts={"SC-N-08":2}`(沿用 v0.2.1)+ **v0.2.2 新字段**`prd_weighted_top_scenario="SC-N-08"` + `prd_weight_distribution={"2":1}` + `prd_keyword_density=0.2`(1 / 5 = 0.2);console.log 输出含 `exempted=SC-B-12`。
+
+---
+
 ## 6. 严重度分布与代码资产
 
 **严重度分布**(0915 T5 v0.2 增量后 42 条):
@@ -278,6 +332,7 @@ curl -sS -X POST http://localhost:3000/api/audit/scenarios \
 ## 7. 后续版本扩展
 
 - **v0.2.1**:PRD 关键词上下文豁免(用 LLM 或品牌白名单,如"支付宝"作为支付品牌不算支付场景)+ PRD 多关键词权重排序(目前仅命中即追加,可按关键词权重排序)
+- **v0.2.2**(2026-09-19 T5 落地):PRD 多关键词权重排序可视化与日志输出增强 — `meta` 新增 3 字段(`prd_weighted_top_scenario` 命中权重最高 v0.2 子场景 / `prd_weight_distribution` 权重分布 `Record<hit_count, count>` / `prd_keyword_density` 命中率 0-1 数字)+ POST handler 内 `console.log` 一行汇总日志(包含 feature/prd_len/prd_scenarios/prd_keywords/top/hit/density/exempted 8 项);零依赖纯 JS 计算 + Node 原生 console.log,沿用 v0.2/v0.2.1 架构;API_VERSION 升 `0.2.2-API-雏形+7-触发类型库扩展+2-财务微服务+PRD关键词深度匹配+PRD上下文豁免+PRD多关键词权重排序+权重排序可视化+日志输出增强`;**沿用 0918 T5 v0.2.1 路径,只复用已建架构,不破坏 42 条场景库不变**;后续 v0.3 仍计划接 Claude Sonnet 4.5
 - **v0.3**:LLM 二次校验 — 接 Claude Sonnet 4.5,对生成的场景做"场景是否真实存在""trigger 是否合理""expected 是否可执行"的二次校验
 - **R-SCENE-01~99 子规则**:目前 42 条为顶层场景,后续可按行业细分(如电商"秒杀超卖"、教育"退课流程"、金融"反洗钱"等子规则);0912 T5 已扩 7 条 + 0914 T5 再扩 2 条 + 0915 T5 再扩 5 条 v0.2 PRD 子场景
 - **行业模板**:对接 36 行业咨询 agent,按行业(电商/教育/金融/医疗...)推荐行业特化场景

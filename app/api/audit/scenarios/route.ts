@@ -38,10 +38,19 @@
  *   - 不做 LLM 二次校验,v0.3 才接 Claude Sonnet 4.5;PRDBRANDEXEMPT 是零依赖纯字符串距离检测
  *   - filterScenarios 返回值增加 prd_exempted_scenarios(被豁免的 v0.2 子场景 ID)+ keyword_hit_counts(每个命中子场景的关键词命中数 Record)
  *   - meta.filter_mode 增加 "prd-exempted" 取值(部分命中被豁免)
+ * - 2026-09-19 T5 03:30:启动 v0.2.2 PRD 多关键词权重排序可视化 + 日志输出增强
+ *   - meta 新增 3 字段:
+ *     - prd_weighted_top_scenario:string | null — v0.2 子场景中 hit_count 最高者;无命中时为 null
+ *     - prd_weight_distribution:Record<string, number> — 权重分布,如 {1: 2, 2: 1, 4: 1} 表示 hit_count=1 有 2 条,=2 有 1 条,=4 有 1 条
+ *     - prd_keyword_density:number — PRD 关键词命中率(命中的 v0.2 子场景数 / v0.2 总子场景数),如 0.4 = 5 条子场景中命中 2 条
+ *   - console.log 日志增强:POST handler 内当 prdMatchedScenarios.length > 0 时,输出 1 行日志(包含 feature 名/prd 文本长度/命中子场景数/命中关键词数/权重最高的 v0.2 子场景 ID + hit_count/被豁免的 v0.2 子场景 ID)
+ *   - GET rules_skipped 删 "PRD 多关键词权重排序(v0.2.1 已落)" + 删 "PRD 多关键词权重排序可视化与日志输出增强(v0.2.2 计划)" 改 "v0.2.2 已落"
+ *   - 零依赖纯 JS 计算(权重最大值 + 分布聚合 + 命中率) + Node 原生 console.log,沿用 v0.2/v0.2.1 架构
  *
- * 设计思路(v0.2 PRD 关键词深度匹配 + v0.2.1 上下文豁免/权重排序):
+ * 设计思路(v0.2 PRD 关键词深度匹配 + v0.2.1 上下文豁免/权重排序 + v0.2.2 可视化/日志增强):
  * - v0.1 基础 37 条保留不变;v0.2 新增 5 条 v0.2 子场景(SCENARIO_LIBRARY_V02_PRD)按 PRD 关键词命中追加
  * - v0.2.1 在 v0.2 基础上增加 2 个增强:上下文豁免(避免品牌误触发)+ 多关键词权重排序(命中强度优先)
+ * - v0.2.2 在 v0.2.1 基础上增加 2 个增强:权重排序可视化(meta 3 字段输出权重最高的子场景 + 权重分布 + 命中率)+ 日志输出增强(console.log 一行汇总便于开发期 dogfood 调试 + 上线后观察 PRD 命中分布)
  * - PRD_KEYWORD_DICT 是零依赖静态关键词词典(5 组关键词 → 5 条子场景),prd 文本 lowercase + includes 扫描
  * - 不做 LLM 二次校验,只做关键词命中/豁免/权重 → 子场景追加;v0.3 可接 Claude Sonnet 4.5 做"场景是否真实存在"的二次校验
  * - filterScenarios 返回值增加 prd_matched_scenarios(命中的 v0.2 子场景)+ prd_keywords_matched(命中的关键词)+ prd_exempted_scenarios(被豁免的子场景)+ keyword_hit_counts(权重)
@@ -101,6 +110,9 @@ interface ScenariosResponse {
     prd_matched_scenarios: string[]; // v0.2 新增:命中的 v0.2 子场景 ID 列表
     prd_exempted_scenarios: string[]; // v0.2.1 新增:被品牌白名单豁免的 v0.2 子场景 ID 列表
     keyword_hit_counts: Record<string, number>; // v0.2.1 新增:每个命中 v0.2 子场景的关键词命中数(权重排序依据)
+    prd_weighted_top_scenario: string | null; // v0.2.2 新增:v0.2 子场景中 hit_count 最高者;无命中时为 null
+    prd_weight_distribution: Record<string, number>; // v0.2.2 新增:权重分布,如 {1: 2, 2: 1, 4: 1} 表示 hit_count=1 有 2 条,=2 有 1 条,=4 有 1 条
+    prd_keyword_density: number; // v0.2.2 新增:PRD 关键词命中率(命中的 v0.2 子场景数 / v0.2 总子场景数),如 0.4 = 5 条子场景中命中 2 条
     categories_requested: Category[];
     categories_returned: Category[];
     scenarios_per_category: Record<Category, number>;
@@ -635,7 +647,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   device: "设备",
 };
 
-const API_VERSION = "0.2.1-API-雏形+7-触发类型库扩展+2-财务微服务+PRD关键词深度匹配+PRD上下文豁免+PRD多关键词权重排序";
+const API_VERSION = "0.2.2-API-雏形+7-触发类型库扩展+2-财务微服务+PRD关键词深度匹配+PRD上下文豁免+PRD多关键词权重排序+权重排序可视化+日志输出增强";
 
 // ============================================================
 // 工具函数
@@ -653,6 +665,9 @@ function filterScenarios(
   prdKeywordsMatched: string[];
   prdExemptedScenarios: string[]; // v0.2.1 新增:被品牌白名单豁免的 v0.2 子场景 ID
   keywordHitCounts: Record<string, number>; // v0.2.1 新增:每个命中 v0.2 子场景的关键词命中数(权重排序依据)
+  prdWeightedTopScenario: string | null; // v0.2.2 新增:v0.2 子场景中 hit_count 最高者;无命中时为 null
+  prdWeightDistribution: Record<string, number>; // v0.2.2 新增:权重分布,如 {1: 2, 2: 1, 4: 1}
+  prdKeywordDensity: number; // v0.2.2 新增:PRD 关键词命中率(命中的 v0.2 子场景数 / v0.2 总子场景数)
   filterMode: "all" | "category" | "keyword" | "prd" | "keyword+prd" | "category+prd" | "prd-exempted" | "keyword+prd-exempted" | "category+prd-exempted";
 } {
   const lowerFeature = feature.toLowerCase().trim();
@@ -747,6 +762,27 @@ function filterScenarios(
     else if (baseMode === "all") combinedMode = `prd${exemptedSuffix}` as typeof combinedMode;
   }
 
+  // v0.2.2 PRD 多关键词权重排序可视化(3 字段计算)
+  // 1. 权重最高的 v0.2 子场景 ID(hit_count 最大者);无命中时为 null
+  let prdWeightedTopScenario: string | null = null;
+  // 2. 权重分布 Record,如 {1: 2, 2: 1, 4: 1} 表示 hit_count=1 有 2 条,=2 有 1 条,=4 有 1 条
+  const prdWeightDistribution: Record<string, number> = {};
+  // 3. PRD 关键词命中率(命中的 v0.2 子场景数 / v0.2 总子场景数),无命中时为 0
+  let prdKeywordDensity = 0;
+  if (Object.keys(keywordHitCounts).length > 0) {
+    let topHitCount = -1;
+    for (const [sid, hc] of Object.entries(keywordHitCounts)) {
+      const hcKey = String(hc);
+      prdWeightDistribution[hcKey] = (prdWeightDistribution[hcKey] || 0) + 1;
+      if (hc > topHitCount) {
+        topHitCount = hc;
+        prdWeightedTopScenario = sid;
+      }
+    }
+    const matchedCount = Object.keys(keywordHitCounts).length;
+    prdKeywordDensity = Math.round((matchedCount / SCENARIO_LIBRARY_V02_PRD.length) * 100) / 100;
+  }
+
   return {
     filtered: pool,
     matchedKeywords,
@@ -754,6 +790,9 @@ function filterScenarios(
     prdKeywordsMatched,
     prdExemptedScenarios,
     keywordHitCounts,
+    prdWeightedTopScenario, // v0.2.2 新增
+    prdWeightDistribution, // v0.2.2 新增
+    prdKeywordDensity, // v0.2.2 新增
     filterMode: combinedMode,
   };
 }
@@ -904,7 +943,7 @@ export async function POST(request: Request) {
 
   const requestedCategories = body.categories && body.categories.length > 0 ? body.categories : validCategories;
 
-  // 3. 过滤场景(v0.2 prd 字段真正参与匹配,追加 v0.2 子场景到 grouped;v0.2.1 上下文豁免 + 多关键词权重排序)
+  // 3. 过滤场景(v0.2 prd 字段真正参与匹配,追加 v0.2 子场景到 grouped;v0.2.1 上下文豁免 + 多关键词权重排序;v0.2.2 权重可视化 + 日志增强)
   const {
     filtered,
     matchedKeywords,
@@ -912,8 +951,22 @@ export async function POST(request: Request) {
     prdKeywordsMatched,
     prdExemptedScenarios,
     keywordHitCounts,
+    prdWeightedTopScenario, // v0.2.2 新增
+    prdWeightDistribution, // v0.2.2 新增
+    prdKeywordDensity, // v0.2.2 新增
     filterMode,
   } = filterScenarios(body.feature, body.categories, body.prd);
+
+  // v0.2.2 日志增强:prd 命中时输出 1 行汇总日志,便于 dogfood 调试 + 上线后观察命中分布
+  if (prdMatchedScenarios.length > 0) {
+    const topHc = prdWeightedTopScenario ? keywordHitCounts[prdWeightedTopScenario] || 0 : 0;
+    console.log(
+      `[audit-scenarios v0.2.2] feature="${body.feature.trim()}" prd_len=${(body.prd || "").length} ` +
+      `prd_scenarios=${prdMatchedScenarios.length} prd_keywords=${prdKeywordsMatched.length} ` +
+      `top=${prdWeightedTopScenario}(hit=${topHc}) ` +
+      `density=${prdKeywordDensity} exempted=${prdExemptedScenarios.length > 0 ? prdExemptedScenarios.join(",") : "none"}`,
+    );
+  }
 
   // v0.2 PRD 命中的子场景追加到 grouped(按类别分组)
   const grouped = groupByCategory(filtered);
@@ -941,6 +994,9 @@ export async function POST(request: Request) {
       prd_matched_scenarios: prdMatchedScenarios.map((s) => s.id),
       prd_exempted_scenarios: prdExemptedScenarios, // v0.2.1 新增
       keyword_hit_counts: keywordHitCounts, // v0.2.1 新增(多关键词权重排序依据)
+      prd_weighted_top_scenario: prdWeightedTopScenario, // v0.2.2 新增
+      prd_weight_distribution: prdWeightDistribution, // v0.2.2 新增
+      prd_keyword_density: prdKeywordDensity, // v0.2.2 新增
       categories_requested: requestedCategories,
       categories_returned: requestedCategories,
       scenarios_per_category: {
@@ -982,7 +1038,7 @@ export async function GET() {
       content_type: "application/json",
       request_shape: {
         feature: "string (required, ≤ 200 字符,功能名)",
-        prd: "string (optional,产品需求描述,v0.2 升级:扫描关键词命中 v0.2 子场景库 5 条;v0.2.1 升级:品牌白名单上下文豁免 + 多关键词权重排序;v0.1 仅记录不解析)",
+        prd: "string (optional,产品需求描述,v0.2 升级:扫描关键词命中 v0.2 子场景库 5 条;v0.2.1 升级:品牌白名单上下文豁免 + 多关键词权重排序;v0.2.2 升级:权重排序可视化 + console.log 日志输出增强;v0.1 仅记录不解析)",
         categories:
           "boundary | concurrency | network | permission | device[] (optional,默认全 5 类)",
       },
@@ -992,7 +1048,7 @@ export async function GET() {
         by_category: "Record<5 类, Scenario[]> 每类 0-N 条(含 v0.2 子场景,v0.2.1 已按 hit_count 降序排列)",
         score_complexity: "1 | 2 | 3 | 4 | 5 (基于返回场景数 + 命中类别数)",
         summary: "string (拼装中文摘要,v0.2 含 PRD 命中子场景数)",
-        meta: "元信息(版本/feature 关键词命中/PRD 关键词命中/PRD 命中 v0.2 子场景 ID/PRD 被豁免子场景 ID(v0.2.1)/keyword_hit_counts(v0.2.1)/categories/scenarios_per_category/filter_mode)",
+        meta: "元信息(版本/feature 关键词命中/PRD 关键词命中/PRD 命中 v0.2 子场景 ID/PRD 被豁免子场景 ID(v0.2.1)/keyword_hit_counts(v0.2.1)/prd_weighted_top_scenario(v0.2.2)/prd_weight_distribution(v0.2.2)/prd_keyword_density(v0.2.2)/categories/scenarios_per_category/filter_mode)",
       },
       categories_implemented: [
         { id: "boundary", label: "边界值", count: scenariosPerCategory.boundary },
@@ -1027,6 +1083,7 @@ export async function GET() {
       rules_skipped: [
         "PRD 关键词上下文豁免(v0.2.1 已落:PRD_BRAND_EXEMPT_DICT 5 子场景品牌白名单 + 距离 ≤ 20 字符豁免规则)",
         "PRD 多关键词权重排序(v0.2.1 已落:每个 v0.2 子场景按 hit_count 降序排序,响应 meta.keyword_hit_counts)",
+        "PRD 多关键词权重排序可视化与日志输出增强(v0.2.2 已落:meta.prd_weighted_top_scenario / prd_weight_distribution / prd_keyword_density 3 字段 + POST handler 内 console.log 一行汇总日志)",
         "LLM 二次校验(v0.3 计划,接 Claude Sonnet 4.5 做'场景是否真实存在'校验)",
         "R-SCENE-01~99 子规则细分(目前 42 条为顶层场景,0912 T5 已扩 7 条,0914 T5 再扩 2 条,0915 T5 再扩 5 条 v0.2 PRD 子场景)",
       ],
