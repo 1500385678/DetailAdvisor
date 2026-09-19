@@ -1,7 +1,7 @@
 /**
- * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 v0.3 二规则 R-READ-03/R-TONE-04 + 增量 R-TYPO-08 + 增量 R-TYPO-09
+ * 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 v0.1/v0.3 五规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 v0.3 二规则 R-READ-03/R-TONE-04 + 增量 R-TYPO-08 + 增量 R-TYPO-09 + 增量 R-TYPO-10
  *
- * Phase 1 §6 模块 1"上线文案审查器"启动 + 7 次增量
+ * Phase 1 §6 模块 1"上线文案审查器"启动 + 8 次增量
  * - 2026-09-02 T5 03:30:启动 commit,落 R-READ-01 句长上限
  * - 2026-09-03 T5 03:30:增量 R-READ-02 句首连词堆叠(零依赖,纯机检)
  * - 2026-09-04 T5 03:30:增量 v0.1 错别字 3 条 + v0.3 语气可读性 2 条(零依赖纯机检)
@@ -21,8 +21,13 @@
  *   - B 类 常见中文文案错别字(20 条)
  *   - C 类 常见成语错别字(15 条)
  *   - R-TYPO-01 命名被 R-TYPO-09 零依赖版接管,语义保留
+ * - 2026-09-20 T5 03:30:增量 R-TYPO-10 标点后空格缺失(13 → 14 规则,采纳 0920 巡检"特别建议路线图 A'"(audit-text v0.2 R-TYPO-10 同族零依赖规则),沿用 R-TYPO-06 pangu 风格架构,无外部依赖)
+ *   - 标点符号紧贴 ASCII 字母/数字(无空格)时报警
+ *   - CJK 标点(，。！？；：)+ ASCII → 报(pangu 同族)
+ *   - ASCII 标点(,.;:!?)+ ASCII 字母 → 报(避免千位符/小数点误报,只对字母报)
+ *   - 与 R-TYPO-06 形成完整"标点 + ASCII"双向覆盖(R-TYPO-06 覆盖"数字/英文+中文"组合,R-TYPO-10 覆盖"标点+ASCII"组合)
  *
- * 当前已实现 13 条规则(均纯机检,零外部依赖):
+ * 当前已实现 14 条规则(均纯机检,零外部依赖):
  * - R-READ-01 句长上限(移动端 28 / 桌面端 40)
  * - R-READ-02 句首连词堆叠(≥2 个连词连用)
  * - R-READ-03 句末标点规范(陈述句末"!"/"?"或无标点,即报)
@@ -33,6 +38,7 @@
  * - R-TYPO-07 连续标点符号(≥3 个同标点连用)
  * - R-TYPO-08 广告法极限词零依赖查表(33 条 4 类)
  * - R-TYPO-09 同音字词表 Top 50 子集零依赖查表(50 条 3 类)
+ * - R-TYPO-10 标点后空格缺失(CJK 标点 + ASCII / ASCII 标点 + ASCII 字母,pangu 同族)
  * - R-TONE-02 "请不要"/"请勿" 引导句式
  * - R-TONE-03 4 类语气词频次一致性
  * - R-TONE-04 感叹号密度(感叹号 / 句子数 > 30%)
@@ -44,7 +50,7 @@
  *
  * 关联文档:
  * - 项目开发计划.md §3 模块 1 + §6 Phase 1 MVP
- * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05/06/07/09
+ * - docs/审查规则/v0.1_文案审查_错别字_敏感词.md §3 R-TYPO-02/03/05/06/07/09/10
  * - docs/审查规则/v0.3_文案审查_语气_可读性.md §3 R-TONE-02/03/04 + §4 R-READ-01/02/03
  * - docs/api/audit-text-v0.1.md
  */
@@ -181,6 +187,16 @@ interface Typo09Hit {
   reason: string; // 给出建议原因(如"军事/技术正式写法")
 }
 
+interface Typo10Hit {
+  rule: "R-TYPO-10";
+  text: string; // 命中的 2 字符片段(如 "，w" / ",W" / ";A")
+  position: number; // 字符偏移(标点侧位置)
+  match: string; // 完整 2 字符匹配
+  punct: string; // 标点字符(如 "，" / "," / ";")
+  ascii_char: string; // ASCII 字符(字母)
+  direction: "cjk-punct-ascii" | "ascii-punct-ascii-letter"; // 标点在前类型
+}
+
 interface AuditResponse {
   verdict: "PASS" | "SOFT_WARN" | "HARD_BLOCK";
   score_deduction: number;
@@ -194,6 +210,7 @@ interface AuditResponse {
   typo07_hits: Typo07Hit[];
   typo08_hits: Typo08Hit[];
   typo09_hits: Typo09Hit[];
+  typo10_hits: Typo10Hit[];
   tone02_hits: Tone02Hit[];
   tone03_hits: Tone03Hit[];
   tone04_hits: Tone04Hit[];
@@ -246,6 +263,7 @@ const TYPO06_MAX = 3;
 const TYPO07_MAX = 3;
 const TYPO08_MAX = 3;
 const TYPO09_MAX = 3;
+const TYPO10_MAX = 3;
 
 /**
  * 按标点切分文本为句子(保留原顺序,过滤空字符串)
@@ -1133,6 +1151,80 @@ function checkTypo09(text: string): { hits: Typo09Hit[]; score: number } {
 }
 
 // ============================================================
+// R-TYPO-10 实现(标点后空格缺失,pangu 同族)
+// 规则:标点符号紧贴 ASCII 字符(无空格)时报
+//   - CJK 标点 + ASCII 字母(如 "，w" / "。world" / "！Hello")→ cjk-punct-ascii
+//   - ASCII 标点 + ASCII 字母(如 ",world" / ";Hello")→ ascii-punct-ascii-letter
+//   - ASCII 标点 + ASCII 数字(如 "1,234")→ 不报(千位符)
+//   - ASCII 标点 + ASCII 标点(如 "..." / "?!")→ 不报(连续标点由 R-TYPO-07 处理)
+//   - CJK 标点 + CJK 字符(中文内文)→ 不报(中文标点后通常无空格)
+//   - CJK 标点 + ASCII 数字(如 "，3")→ 不报(千位符 + 数字场景,R-TYPO-06 已覆盖类似场景,这里只报字母)
+// 阈值:每命中 1 处 1 分,单条上限 3 分
+// 白名单:不豁免(标点后直接接字母几乎一定是手滑/排版错误)
+// 选型:零依赖纯 regex + R-TYPO-06 pangu 同族架构,无外部包
+// ============================================================
+
+/**
+ * R-TYPO-10 标点后空格缺失检测 regex
+ * - 模式 1:CJK 标点 + ASCII 字母(全角标点 + 0-9A-Za-z)
+ *   - CJK 标点 unicode 范围:0x3000-0x303F(CJK 符号和标点)/ 0xFF01-0xFF0E(全角 ASCII 前缀)
+ *   - 实际只关心 "，。！？；：" 这 6 个常用标点(避免引号/括号场景误报)
+ * - 模式 2:ASCII 标点 + ASCII 字母
+ *   - ASCII 标点:",.;:!?"(排除 "[" / "(" 等括号)
+ *   - 数字不报(避免千位符/小数点误报,如 "1,234" / "3.14")
+ *   - 后行引用只报字母
+ * 用 2 个独立 regex 避免 matchAll 消费后漏掉(沿用 R-TYPO-06 模式)
+ */
+const PUNCT_CJK_ASCII_RE = /[，。！？；：][A-Za-z]/g;
+const PUNCT_ASCII_ASCII_RE = /[,.;:!?][A-Za-z]/g;
+
+/**
+ * R-TYPO-10 标点后空格缺失检测
+ * - 扫所有"标点+ASCII 字母紧贴"对(2 个独立 regex 双向独立)
+ * - 不做"建议插入空格位置"提示:只报 hit 让用户判断
+ * - 与 R-TYPO-06 互补:R-TYPO-06 覆盖"数字/英文↔中文"组合,R-TYPO-10 覆盖"标点+ASCII"组合
+ */
+function checkTypo10(text: string): { hits: Typo10Hit[]; score: number } {
+  const hits: Typo10Hit[] = [];
+  let score = 0;
+
+  // 模式 1:CJK 标点 + ASCII 字母
+  for (const m of text.matchAll(PUNCT_CJK_ASCII_RE)) {
+    const match = m[0];
+    const position = m.index ?? 0;
+    hits.push({
+      rule: "R-TYPO-10",
+      text: match,
+      position,
+      match,
+      punct: match[0],
+      ascii_char: match[1],
+      direction: "cjk-punct-ascii",
+    });
+    score = Math.min(score + 1, TYPO10_MAX);
+  }
+  // 模式 2:ASCII 标点 + ASCII 字母
+  for (const m of text.matchAll(PUNCT_ASCII_ASCII_RE)) {
+    const match = m[0];
+    const position = m.index ?? 0;
+    hits.push({
+      rule: "R-TYPO-10",
+      text: match,
+      position,
+      match,
+      punct: match[0],
+      ascii_char: match[1],
+      direction: "ascii-punct-ascii-letter",
+    });
+    score = Math.min(score + 1, TYPO10_MAX);
+  }
+
+  // 按 position 排序,便于客户端按顺序展示
+  hits.sort((a, b) => a.position - b.position);
+  return { hits, score };
+}
+
+// ============================================================
 // POST handler
 // ============================================================
 
@@ -1193,6 +1285,9 @@ export async function POST(request: Request) {
   // R-TYPO-09 检测(同音字词表 Top 50 子集零依赖查表)
   const { hits: typo09Hits, score: typo09Score } = checkTypo09(body.text);
 
+  // R-TYPO-10 检测(标点后空格缺失,pangu 同族)
+  const { hits: typo10Hits, score: typo10Score } = checkTypo10(body.text);
+
   // R-TONE-02 检测(否定句否定词置顶)
   const { hits: tone02Hits, score: tone02Score } = checkTone02(body.text);
 
@@ -1202,7 +1297,7 @@ export async function POST(request: Request) {
   // R-TONE-04 检测(感叹号密度)
   const { hits: tone04Hits, score: tone04Score } = checkTone04(body.text);
 
-  // 总扣分(13 规则累加,单条上限 5 分)
+  // 总扣分(14 规则累加,单条上限 5 分)
   const totalScore = Math.min(
     read01Score +
       read02Score +
@@ -1214,6 +1309,7 @@ export async function POST(request: Request) {
       typo07Score +
       typo08Score +
       typo09Score +
+      typo10Score +
       tone02Score +
       tone03Score +
       tone04Score,
@@ -1237,6 +1333,7 @@ export async function POST(request: Request) {
     typo07_hits: typo07Hits,
     typo08_hits: typo08Hits,
     typo09_hits: typo09Hits,
+    typo10_hits: typo10Hits,
     tone02_hits: tone02Hits,
     tone03_hits: tone03Hits,
     tone04_hits: tone04Hits,
@@ -1251,6 +1348,7 @@ export async function POST(request: Request) {
       typo07: { hits: typo07Hits, score: typo07Score },
       typo08: { hits: typo08Hits, score: typo08Score },
       typo09: { hits: typo09Hits, score: typo09Score },
+      typo10: { hits: typo10Hits, score: typo10Score },
       tone02: { hits: tone02Hits, score: tone02Score },
       tone03: { hits: tone03Hits, score: tone03Score },
       tone04: { hits: tone04Hits, score: tone04Score },
@@ -1267,6 +1365,7 @@ export async function POST(request: Request) {
         "R-TYPO-07",
         "R-TYPO-08",
         "R-TYPO-09",
+        "R-TYPO-10",
         "R-TONE-02",
         "R-TONE-03",
         "R-TONE-04",
@@ -1296,6 +1395,7 @@ interface RuleSummary {
   typo07: { hits: Typo07Hit[]; score: number };
   typo08: { hits: Typo08Hit[]; score: number };
   typo09: { hits: Typo09Hit[]; score: number };
+  typo10: { hits: Typo10Hit[]; score: number };
   tone02: { hits: Tone02Hit[]; score: number };
   tone03: { hits: Tone03Hit[]; score: number };
   tone04: { hits: Tone04Hit[]; score: number };
@@ -1364,6 +1464,12 @@ function buildSummary(s: RuleSummary): string {
   } else {
     parts.push(`R-TYPO-09 命中 ${s.typo09.hits.length} 处同音字,扣 ${s.typo09.score} 分`);
   }
+  // R-TYPO-10
+  if (s.typo10.hits.length === 0) {
+    parts.push(`R-TYPO-10 通过(标点后无紧贴 ASCII)`);
+  } else {
+    parts.push(`R-TYPO-10 命中 ${s.typo10.hits.length} 处标点后紧贴,扣 ${s.typo10.score} 分`);
+  }
   // R-TONE-02
   if (s.tone02.hits.length === 0) {
     parts.push(`R-TONE-02 通过(无"请不要/请勿"引导)`);
@@ -1392,7 +1498,7 @@ export async function GET() {
   return NextResponse.json(
     {
       api: "DetailAdvisor · 文案审查",
-      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09",
+      version: "0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09+R-TYPO-10",
       method: "POST",
       endpoint: "/api/audit/text",
       content_type: "application/json",
@@ -1411,6 +1517,7 @@ export async function GET() {
         "R-TYPO-07(连续标点符号检测,≥3 个同标点连用)",
         "R-TYPO-08(广告法极限词零依赖查表,33 条词表 4 类分类)",
         "R-TYPO-09(同音字词表 Top 50 子集零依赖查表,50 条词表 3 类分类:tech/general/idiom,沿用 R-TYPO-08 架构)",
+        "R-TYPO-10(标点后空格缺失,CJK 标点 + ASCII 字母 / ASCII 标点 + ASCII 字母,pangu 同族,与 R-TYPO-06 互补)",
         "R-TONE-02(否定句否定词置顶,检测'请不要'/'请勿')",
         "R-TONE-03(语气一致性,4 类语气词占比 ≥ 70%)",
         "R-TONE-04(感叹号密度检测,感叹号数/句子数 > 30% 即报)",

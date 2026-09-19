@@ -1,7 +1,7 @@
-# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 5 零依赖规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 R-READ-03 + R-TONE-04 + 增量 R-TYPO-08 + 增量 R-TYPO-09
+# 文案审查 API · v0.1 API 雏形 + 增量 R-READ-02 + 增量 5 零依赖规则 + 增量 R-TYPO-06 + 增量 R-TYPO-07 + 增量 R-READ-03 + R-TONE-04 + 增量 R-TYPO-08 + 增量 R-TYPO-09 + 增量 R-TYPO-10
 
-> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 七次增量 · 2026-09-17
-> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02 / 0904 T5 增量 v0.1 错别字 3 条 + v0.3 语气 2 条 / 0905 T5 增量 R-TYPO-06 / 0906 T5 增量 R-TYPO-07 / 0908 T5 增量 R-READ-03 + R-TONE-04 / 0909 T5 增量 R-TYPO-08 / 0917 T5 增量 R-TYPO-09 同音字词表 Top 50 子集
+> DetailAdvisor 模块 1(文案审查器)后端 API · v0.1 雏形 + 八次增量 · 2026-09-20
+> 落地 commit: 0902 T5 启动 / 0903 T5 增量 R-READ-02 / 0904 T5 增量 v0.1 错别字 3 条 + v0.3 语气 2 条 / 0905 T5 增量 R-TYPO-06 / 0906 T5 增量 R-TYPO-07 / 0908 T5 增量 R-READ-03 + R-TONE-04 / 0909 T5 增量 R-TYPO-08 / 0917 T5 增量 R-TYPO-09 同音字词表 Top 50 子集 / 0920 T5 增量 R-TYPO-10 标点后空格缺失(pangu 同族)
 > 入口: `app/api/audit/text/route.ts`(Next.js 16 App Router Route Handler)
 
 ---
@@ -10,10 +10,10 @@
 
 | 项 | 说明 |
 |---|------|
-| 当前已实现 | **13 条规则**(均纯机检,零外部依赖):**R-READ-01**(句长上限,0902)+ **R-READ-02**(句首连词堆叠,0903)+ **R-READ-03**(句末标点规范,0908)+ **R-TYPO-02**(多字/漏字/重复字,0904)+ **R-TYPO-03**(中英文标点混用,0904)+ **R-TYPO-05**(全角/半角混用,0904)+ **R-TYPO-06**(数字/英文与中文之间空格缺失,0905)+ **R-TYPO-07**(连续标点符号 ≥ 3 同标点,0906)+ **R-TYPO-08**(广告法极限词零依赖查表 33 条 4 类,0909)+ **R-TYPO-09**(同音字词表 Top 50 子集零依赖查表 50 条 3 类 tech/general/idiom,0917)+ **R-TONE-02**(否定句否定词置顶,0904)+ **R-TONE-03**(语气一致性,0904)+ **R-TONE-04**(感叹号密度,0908) |
+| 当前已实现 | **14 条规则**(均纯机检,零外部依赖):**R-READ-01**(句长上限,0902)+ **R-READ-02**(句首连词堆叠,0903)+ **R-READ-03**(句末标点规范,0908)+ **R-TYPO-02**(多字/漏字/重复字,0904)+ **R-TYPO-03**(中英文标点混用,0904)+ **R-TYPO-05**(全角/半角混用,0904)+ **R-TYPO-06**(数字/英文与中文之间空格缺失,0905)+ **R-TYPO-07**(连续标点符号 ≥ 3 同标点,0906)+ **R-TYPO-08**(广告法极限词零依赖查表 33 条 4 类,0909)+ **R-TYPO-09**(同音字词表 Top 50 子集零依赖查表 50 条 3 类 tech/general/idiom,0917)+ **R-TYPO-10**(标点后空格缺失,CJK 标点 + ASCII / ASCII 标点 + ASCII 字母,pangu 同族,与 R-TYPO-06 互补,0920)+ **R-TONE-02**(否定句否定词置顶,0904)+ **R-TONE-03**(语气一致性,0904)+ **R-TONE-04**(感叹号密度,0908) |
 | 暂未实现 | R-TYPO-04(量词,需 LLM)/ R-BRAND-01~04(品牌词,需词表,Phase 1.5)/ R-TONE-01(二义性,需 LLM)/ R-READ-03-LLM(信息密度,需 LLM,0908 已落零依赖"句末标点规范"同名规则);**R-TYPO-01(同音字)0917 已由 R-TYPO-09 零依赖版接管,跳过项移除** |
-| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 七次增量 commit,2 规则 → 13 规则扩展,代码资产 0 → 0.8 起步 |
-| 关联规则 | `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` §3 R-TYPO-02/03/05/06/07/08/09 + `docs/审查规则/v0.3_文案审查_语气_可读性.md` §3/§4 R-TONE-02/03/04 + R-READ-01/02/03 |
+| 优先级 | Phase 1 §6 模块 1"上线文案审查器"启动 + 八次增量 commit,2 规则 → 14 规则扩展,代码资产 0 → 0.9 起步 |
+| 关联规则 | `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` §3 R-TYPO-02/03/05/06/07/08/09/10 + `docs/审查规则/v0.3_文案审查_语气_可读性.md` §3/§4 R-TONE-02/03/04 + R-READ-01/02/03 |
 
 ## 2. 接口
 
@@ -142,6 +142,17 @@ Content-Type: application/json
       "reason": string                // 给出建议原因(如"军事/技术正式写法")
     }
   ],
+  "typo10_hits": [                    // R-TYPO-10 命中项数组(0920 增量)
+    {
+      "rule": "R-TYPO-10",
+      "text": string,                 // 命中的 2 字符片段(如 "，w" / ",W" / ";A")
+      "position": number,             // 字符偏移(标点侧位置)
+      "match": string,                // 完整 2 字符匹配
+      "punct": string,                // 标点字符(如 "，" / "," / ";")
+      "ascii_char": string,           // ASCII 字符(字母)
+      "direction": "cjk-punct-ascii" | "ascii-punct-ascii-letter"  // 标点在前类型
+    }
+  ],
   "tone02_hits": [                    // R-TONE-02 命中项数组(0904 增量)
     {
       "rule": "R-TONE-02",
@@ -164,11 +175,11 @@ Content-Type: application/json
       "threshold": 0.7                // 阈值
     }
   ],
-  "summary": string,                  // 一句话总结(13 规则分号分隔)
+  "summary": string,                  // 一句话总结(14 规则分号分隔)
   "meta": {
     "rules_evaluated": [
       "R-READ-01", "R-READ-02", "R-READ-03",
-      "R-TYPO-02", "R-TYPO-03", "R-TYPO-05", "R-TYPO-06", "R-TYPO-07", "R-TYPO-08", "R-TYPO-09",
+      "R-TYPO-02", "R-TYPO-03", "R-TYPO-05", "R-TYPO-06", "R-TYPO-07", "R-TYPO-08", "R-TYPO-09", "R-TYPO-10",
       "R-TONE-02", "R-TONE-03", "R-TONE-04"
     ],
     "rules_skipped": [...],           // 暂未实现的规则列表
@@ -554,6 +565,65 @@ score = min(命中处数, 3)
 | 请确认订单后提交申请。 | ❌ 不命中 | (无需改) |
 | 验证码已发送到您的手机,请注意查收。 | ❌ 不命中("验证"已正确) | (无需改) |
 
+### 3.12 R-TYPO-10 标点后空格缺失(0920 增量,14 规则扩展)
+
+#### 规则定义
+
+> 标点符号紧贴 ASCII 字母(无空格)时报警;pangu 同族规则,与 R-TYPO-06 互补:
+> - R-TYPO-06 覆盖"数字/英文 ↔ 中文"组合(如"次1" / "1次")
+> - R-TYPO-10 覆盖"标点 + ASCII 字母"组合(如"您好，world" / "Hello,world")
+>
+> **命名空间说明**: R-TYPO-10 编号沿用 TYPO 序列,与 R-TYPO-06 同族("pangu 风格零依赖纯 regex"),不依赖 hanlp 字典 / LLM;**v0.2 后续可接 LLM 二次校验做上下文豁免**(对齐 v0.1 §4.3 上下文豁免原则,如"Mr."缩写的句末"."不在词表范围)。
+
+#### 检测 regex(2 个独立模式)
+
+```
+PUNCT_CJK_ASCII_RE   = /[，。！？；：][A-Za-z]/g   // CJK 标点 + ASCII 字母
+PUNCT_ASCII_ASCII_RE = /[,.;:!?][A-Za-z]/g        // ASCII 标点 + ASCII 字母
+```
+
+#### 检测算法
+
+```
+对每个 regex:
+  扫所有"标点 + ASCII 字母紧贴"对(2 个独立 regex 双向独立,避免 matchAll 消费漏检)
+    命中 → 报 1 hit {rule: "R-TYPO-10", punct, ascii_char, direction}
+所有 hits 按 position 升序输出。
+```
+
+#### 关键设计点
+
+- **零依赖纯 regex**: 2 个独立 regex,无外部包/字典/状态,部署即用,与 R-TYPO-06 同模式
+- **2 个独立 regex 双向独立**: 避免 matchAll 消费后漏掉(沿用 R-TYPO-06 经验)
+- **不报千位符 / 小数点**: ASCII 标点 + 数字场景不报(如 "1,234" / "3.14"),只对字母报(避免误报)
+- **不报连续标点**: ASCII 标点 + ASCII 标点场景不报(如 "..." / "?!" 连续标点由 R-TYPO-07 处理)
+- **不报中文内文**: CJK 标点 + CJK 字符场景不报(中文标点后通常无空格,如"您好。欢迎使用。")
+- **"direction" 字段分类**: cjk-punct-ascii / ascii-punct-ascii-letter 便于客户端差异化提示(中文排版 vs 英文排版)
+- **"punct" + "ascii_char" 字段**: 客户端可精确还原"哪个标点后接哪个字母",便于插入空格
+- **不豁免**: v0.1 雏形阶段不做上下文豁免,全报;v0.2 接 LLM 二次校验时再做"Mr. / i.e. / etc."等英文缩写豁免
+
+#### 扣分公式
+
+```
+score = min(命中处数, 3)
+```
+
+- 每命中 1 处扣 1 分(R-TYPO-10 单条上限 3 分,与 TYPO-02/03/05/06/07/08/09 持平)
+- 总扣分 = `min(Σ 14 规则扣分, 5)`
+- verdict 映射: 0 分 → PASS, ≥1 分 → SOFT_WARN(软调,不阻塞)
+
+#### 自检示例
+
+| 原文 | R-TYPO-10 命中 | 改写 |
+|------|----------------|------|
+| 请确认订单后提交申请。 | ❌ 不命中(中文内文 + 句末标点规范) | (无需改) |
+| 您好,world 欢迎使用。 | ✅ 命中 1 处(",w" pos=2 direction=ascii-punct-ascii-letter)扣 1 分 | 您好, world 欢迎使用。 |
+| 您好，world 欢迎使用。 | ✅ 命中 1 处("，w" pos=2 direction=cjk-punct-ascii)扣 1 分 | 您好, world 欢迎使用。 |
+| Hello,world please confirm. | ✅ 命中 1 处(",w" pos=5 direction=ascii-punct-ascii-letter)扣 1 分 | Hello, world please confirm. |
+| 订单金额 1,234 元折扣后 3.14 元。 | ❌ 不命中(",3" 是千位符,".3" 是小数点,均不报) | (无需改) |
+| 您好,欢迎使用本产品。点击下一步继续。 | ❌ 不命中(中文内文标点后接中文,正常) | (无需改) |
+| 请先布署再登陆,world 帐号继续。 | ✅ R-TYPO-10 命中 1 处(",w"),R-TYPO-09 命中 3 处(布署→部署 + 登陆→登录 + 帐号→账号),多规则累加 4 分 | 请先部署再登录, world 账号继续。 |
+
 ## 4. 验证示例
 
 ### 4.1 桌面端长句(超 40 字,触发 SOFT_WARN)
@@ -769,10 +839,21 @@ curl -X POST http://localhost:3000/api/audit/text \
 - [x] `npx next build` 通过(`/api/audit/text` 路由注册 + 13 规则 meta 正确,production bundle 验证,代码 1270 → 1428 行 +158 行)
 - [x] curl 端到端验证 8 例:启动 `npx next dev -p 4123` → **T1 GET 元信息确认 13 规则已实现**(`version: 0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09`,`rules_implemented` 第 10 项含 R-TYPO-09 + `rules_evaluated` 13 条 + `rules_skipped` 已移除 R-TYPO-01)→ **T2 PASS 文案**("请确认订单后提交申请。" → typo09_hits=[])→ **T3 tech 类命中**("请先布署服务器后再登陆帐号进行配置。" → typo09_hits 3 处: 布署→部署 tech + 登陆→登录 tech + 帐号→账号 tech,扣 3 分)→ **T4 general 类命中**("截至 12 月 31 日前制订的权力清单请提交。" → typo09_hits 3 处: 截至→截止 general + 制订→制定 general + 权力→权利 general,扣 3 分)→ **T5 idiom 类命中**("我们要再接再励,做到川流不息地为客户创造价值。" → typo09_hits 1 处: 再接再励→再接再厉 idiom,扣 1 分)→ **T6 多规则累加**("布署百份百稳赚不赔的最佳服务器" → typo09 1 处(布署→部署)+ typo08 2 处(稳赚不赔 promise + 最佳 absolute),多规则累加 4 分)→ **T7 长词优先去重**("原本那条穿流不息的小河" → typo09_hits 1 处"穿流不息"→"川流不息",未被"穿流"+"不息"拆开误报)→ **T8 多处不同位置不重叠**("先布署再登陆帐号" → typo09_hits 3 处: 布署@pos 1 + 登陆@pos 4 + 帐号@pos 6 position 升序,扣 3 分)→ **T9 错误响应**("text": "" → 400 `{"error":"`text` is empty"}` / "not-json" → 400)→ 关闭 dev server
 
+### 6.9 0920 T5(R-TYPO-10 增量:标点后空格缺失,pangu 同族,13 → 14 规则扩展)
+
+- [x] `npx tsc --noEmit` 通过(0 errors,新 `Typo10Hit` 接口(**6 字段**:rule/text/position/match/punct/ascii_char/direction)+ 2 个独立 regex 常量 `PUNCT_CJK_ASCII_RE = /[，。！？；：][A-Za-z]/g` 扫 CJK 标点 + ASCII 字母 + `PUNCT_ASCII_ASCII_RE = /[,.;:!?][A-Za-z]/g` 扫 ASCII 标点 + ASCII 字母(避免千位符/小数点误报,只对字母报)+ `checkTypo10` 函数(2 个独立 regex 双向独立,合并后 position 升序,沿用 R-TYPO-06 实现模式)+ POST handler 14 规则累加 + GET 元信息 14 规则全部类型对齐 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09+R-TYPO-10`)
+- [x] `npx eslint .` 通过(0 errors / 0 warnings)
+- [x] `npx next build` 通过(`/api/audit/text` 路由注册 + 14 规则 meta 正确,production bundle 验证,代码 1428 → 1535 行 +107 行)
+- [x] curl 端到端验证 6 例:启动 `npx next dev -p 4123` → **T1 GET 元信息确认 14 规则已实现**(`version` 含 `+R-TYPO-10` + `rules_implemented` 第 11 项含 R-TYPO-10 + `rules_evaluated` 14 条 + `rules_skipped` 不变)→ **T2 PASS 文案**("请确认订单后提交申请。" → typo10_hits=[],中文内文标点后接中文不报)→ **T3 CJK 标点 + ASCII 命中**("您好,world 欢迎使用。" → typo10_hits 1 处: "，w" pos=2 direction=cjk-punct-ascii,扣 1 分)→ **T4 ASCII 标点 + ASCII 字母命中**("Hello,world please confirm." → typo10_hits 1 处: ",w" pos=5 direction=ascii-punct-ascii-letter,扣 1 分)→ **T5 千位符/小数点不报**("订单金额 1,234 元折扣后 3.14 元。" → typo10_hits=[],",3" 千位符 / ".3" 小数点均不报,只对字母报)→ **T6 中文内文标点后接中文正常**("您好,欢迎使用本产品。点击下一步继续。" → typo10_hits=[],中文内文正常不报)→ **T7 多规则累加**("请先布署再登陆,world 帐号继续。" → typo09 3 处: 布署→部署 tech + 登陆→登录 tech + 帐号→账号 tech + typo10 1 处: ",w" ascii-punct-ascii-letter,多规则累加 5 分上限 verdict=SOFT_WARN)→ 关闭 dev server
+
+> **R-TYPO-10 选型理由**:① 零依赖纯 regex + 2 个独立 regex 双向独立(沿用 R-TYPO-06 经验,避免 matchAll 消费漏检);② 不报千位符/小数点(ASCII 标点 + 数字场景不报,只对字母报,避免误报);③ 不报连续标点(ASCII 标点 + ASCII 标点由 R-TYPO-07 处理);④ 不报中文内文(CJK 标点 + CJK 字符场景不报,中文排版通常无空格);⑤ 2 个 direction 字段分类(cjk-punct-ascii / ascii-punct-ascii-letter)便于客户端差异化提示(中文排版 vs 英文排版);⑥ "punct" + "ascii_char" 字段客户端可精确还原"哪个标点后接哪个字母",便于插入空格提示;⑦ 与 R-TYPO-06 形成完整"标点 + ASCII"双向覆盖(R-TYPO-06 覆盖"数字/英文 ↔ 中文"组合,R-TYPO-10 覆盖"标点 + ASCII"组合);**v0.2 后续可接 LLM 二次校验做上下文豁免**(对齐 v0.1 §4.3 上下文豁免原则,如"Mr." / "i.e." 等英文缩写 + 末位标点不报)
+>
+> **0829 起 `.plan/` 漂移模式第 22 天延续**(0902-0920 连续 19 天"无 plan,临时决策"模式);**0825-0920 共 25 个 T4/T5 周期**;0920 T5 一次性兑现 0920 巡检"特别建议路线图 A'(audit-text v0.2 R-TYPO-10/R-TONE-05/R-READ-04 同族零依赖规则)"最高优,采纳方案 A'(沿用 0917 T5 R-TYPO-09 同族扩展路径,与 §6 模块 1 v0.2 R-TYPO-09 子项已勾选对称,代码增量可控 + 风险最低);**Phase 1 §6 模块 1 从 13 规则扩到 14 规则,代码资产 0.8 → 0.9 起步;0920 巡检"特别建议路线图 A'" 100% 兑现**;**0914-0920 巡检累计建议兑现率 16/16(100%,连续 7 期零断档兑现)**
+
 ## 7. 关联文档
 
-- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(累计勾选:启动 v0.1 + R-READ-02 增量 + 5 零依赖规则增量 + R-TYPO-06 增量 + R-TYPO-07 增量 + R-READ-03 + R-TONE-04 增量 + R-TYPO-08 增量 + R-TYPO-09 增量,共 8 个子项;**§5 Phase 0 接受 7/10 收口,3 项外部依赖项降级 Phase 1.5/Phase 2** 0908 T5 落痕;**§6 主项 2 处备注栏增补** 0908 T5 落痕;**§6 子项 0908 T5 落痕 + 12 规则收口备注** 0909 T5 落痕;**§6 子项 0917 T5 落痕 + 13 规则扩展备注** 0917 T5 落痕)
-- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子(0904 T5 落地 R-TYPO-02/03/05;0905 T5 落地 R-TYPO-06;0906 T5 落地 R-TYPO-07;0909 T5 落地 R-TYPO-08 广告法极限词零依赖查表;**0917 T5 落地 R-TYPO-09 同音字词表 Top 50 子集零依赖查表**)
+- `项目开发计划.md` §3 模块 1 + §6 Phase 1 MVP(累计勾选:启动 v0.1 + R-READ-02 增量 + 5 零依赖规则增量 + R-TYPO-06 增量 + R-TYPO-07 增量 + R-READ-03 + R-TONE-04 增量 + R-TYPO-08 增量 + R-TYPO-09 增量 + R-TYPO-10 增量,共 9 个子项;**§5 Phase 0 接受 7/10 收口,3 项外部依赖项降级 Phase 1.5/Phase 2** 0908 T5 落痕;**§6 主项 2 处备注栏增补** 0908 T5 落痕;**§6 子项 0908 T5 落痕 + 12 规则收口备注** 0909 T5 落痕;**§6 子项 0917 T5 落痕 + 13 规则扩展备注** 0917 T5 落痕;**§6 子项 0920 T5 落痕 + 14 规则扩展备注** 0920 T5 落痕)
+- `docs/审查规则/v0.1_文案审查_错别字_敏感词.md` v0.1 规则种子(0904 T5 落地 R-TYPO-02/03/05;0905 T5 落地 R-TYPO-06;0906 T5 落地 R-TYPO-07;0909 T5 落地 R-TYPO-08 广告法极限词零依赖查表;**0917 T5 落地 R-TYPO-09 同音字词表 Top 50 子集零依赖查表**;**0920 T5 落地 R-TYPO-10 标点后空格缺失 pangu 同族**)
 - `docs/审查规则/v0.2_文案审查_品牌词.md` v0.2 规则种子(Phase 1.5)
 - `docs/审查规则/v0.3_文案审查_语气_可读性.md` v0.3 规则种子(0904 T5 落地 R-TONE-02/03;0902-0903 已落地 R-READ-01/02;**0908 T5 落地 R-READ-03 句末标点规范 + R-TONE-04 感叹号密度,沿用 v0.3 ID 与命名空间**)
 - `docs/a11y/axe-core_基线_v0.1.md` 0901 T5 落地
@@ -791,3 +872,4 @@ curl -X POST http://localhost:3000/api/audit/text \
 | 2026-09-08 | v0.1 API 五次增量 v0.3 二规则零依赖扩展(9 → 11 规则,恢复 0907 T5 首次断档后连续节奏):`app/api/audit/text/route.ts` 新增 `Read03Hit` 接口(6 字段:rule/sentence/position/issue/actual_ending/primary_script)+ `Tone04Hit` 接口(5 字段:rule/exclam_count/sentence_count/ratio/threshold)+ `checkRead03` 函数(**独立 regex** SENTENCE_WITH_ENDING_RE `/[^。！？!?;；]*[。！？!?;；]?/g` 保留句末标点扫描 + 中英合法标点集判定 CJK_STATEMENT_ENDINGS(7 个)/ LATIN_STATEMENT_ENDINGS(5 个)+ 疑问/感叹语气词白名单 `INTERROGATIVE_PARTICLES = /[吗呢吧呀啊哦哇哎]/` 豁免末"!"/"?"的疑问/感叹句 + issue 双分类 `missing-punct`(无标点)/ `inconsistent-ending`(陈述句末"!"/"?")+ `checkTone04` 函数(EXCLAM_RE `/[!！]/g` 扫中英感叹号数 / splitSentences 句子数 → ratio > 0.3 即报,全篇级只报 1 hit)+ POST handler 11 规则累加(score 上限 5 分)+ GET 元信息 11 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04` + 文档 §1/§2.3/§3.8-3.9/§5/§6.6/§7/§8 全部对齐;**`npx tsc --noEmit` / `npx eslint .` / `npx next build` 三验证通过**(初版 `splitSentences` 复赋值未用 ESLint 警告已修)+ 8 个 curl 端到端用例全过(T1 GET 11 规则 / T2 missing-punct 命中 / T3 inconsistent-ending 2 命中 + Tone04 100% / T4 疑问句"吗"豁免 + missing-punct / T5 1 感叹 / 2 句 = 50% 命中 / T6 英文双陈述 PASS / T7 中文末"。" PASS / T8 综合 4 句感叹 + 多规则累加 5 分上限);**无 plan,临时决策**(0902-0903-0904-0905-0906-0907-0908 漂移模式第 7 天延续,0829 起 `.plan/` 漂移模式已稳定 10 天;**0907 T5 首次断档后 0908 T5 恢复连续节奏**;**0825-0908 共 15 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 9 规则扩到 11 规则,代码资产 0.5 → 0.6 起步;目标 12+ 规则收口**;选型理由:① 零依赖纯 regex(SENTENCE_WITH_ENDING_RE 解决 splitSentences 剥标点问题);② 中英双标点集覆盖完整;③ 疑问/感叹语气词白名单豁免"?"末"/"!"/"吗呢吧呀"等合法疑问/感叹场景,避免误报;④ R-READ-03 命名沿用 v0.3 种子 ID 但语义替换为"句末标点规范"(原 LLM 版"信息密度"留 R-READ-03-LLM 标注);⑤ R-TONE-04 命名沿用 v0.3 种子 TONE-01~04 序列("感叹号密度"),属零依赖纯机检;**同步兑现 0907 巡检 4 项"最高优"建议**:`项目开发计划.md` §5 末尾 + §6 主项 2 处备注栏 + §6 子项 0908 T5 主交付留痕(0904 中优建议累计跨 5 天(0904-0905-0906-0907-0908)0908 T5 一次性兑现);**后续可再扩 v0.1 错别字 1-2 条 R-TYPO-08 同音字词表(零依赖 Top 50 子集) 收口 12+ 规则** | 03:30 T5 cron |
 | 2026-09-09 | v0.1 API 六次增量 R-TYPO-08 广告法极限词零依赖查表(**11 → 12 规则收口**,兑现 0908 巡检建议):`app/api/audit/text/route.ts` 新增 `Typo08Hit` 接口(5 字段:rule/text/position/match/category)+ `ABSOLUTE_WORDS` 静态词表常量(**4 类 33 条 2+ 字词**:absolute 绝对化 8 条 / ranking 排名 9 条 / degree 程度 9 条 / promise 承诺 7 条)+ `checkTypo08` 函数(零依赖纯字符串查表 + **长词优先匹配** 按 word.length 降序 + **区间去重** 防子串重复报,如"稳赚不赔"与"稳赚"分别报 1 次不嵌套)+ POST handler 12 规则累加(score 上限 5 分,单条 TYPO-08 上限 3 分)+ GET 元信息 12 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08` + 文档 §1/§2.3/§3.10/§6.7/§7/§8 全部对齐 + `docs/审查规则/v0.1_...md` §3 增 R-TYPO-08 规则定义(词表/算法/示例)+ §10 变更记录追加 0909 行;**`npx tsc --noEmit` / `npx eslint .` / `npx next build` 三验证通过** + 8 个 curl 端到端用例全过(T1 GET 12 规则 / T2 极限词命中 3 处 / T3 PASS 用例 / T4 4 分类分别命中 / T5 长词优先"最好吃"不拆 / T6 长词+短词"稳赚不赔"+"稳赚"不重叠 / T7 4 类 33 词累加扣 3 分上限 / T8 错误响应 400);**无 plan,临时决策**(0902-0903-0904-0905-0906-0907-0908-0909 漂移模式第 8 天延续,0829 起 `.plan/` 漂移模式已稳定 11 天;**0825-0909 共 16 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 11 规则扩到 12 规则,代码资产 0.6 → 0.7 起步;0908 巡检建议"目标 12+ 规则收口"100% 兑现**;R-TYPO-08 选型理由:① 零依赖纯字符串查表 + 2+ 字词避免单字"最"/"全"误报;② 长词优先匹配 + 区间去重避免"稳赚"与"稳赚不赔"重复报;③ 4 类 category 字段(absolute / ranking / degree / promise)便于客户端差异化提示(法务警示 vs 营销警示 vs 金融承诺);④ 选型与 0908 提到的 R-TYPO-01 计划"同音字"不同方向(同音字需 hanlp 字典),R-TYPO-08 属"零依赖静态词表"族,纯字符串查表无外部依赖;**v0.2 后续可接 LLM 二次校验做上下文豁免**(对齐 v0.1 §4.3 上下文豁免原则);**Phase 1 §6 模块 1 12 规则收口,后续可启动异常场景发现器 + A11y 审查 v1 + 飞书 bot 触发接入 + 健康度曲线 + dogfood 等其他模块** | 03:30 T5 cron |
 | 2026-09-17 | v0.1 API 七次增量 R-TYPO-09 同音字词表 Top 50 子集零依赖查表(**12 → 13 规则扩展**,采纳 0917 巡检"特别建议路线图 A" + 沿用 R-TYPO-08 零依赖静态词表架构,无需 hanlp 字典):`app/api/audit/text/route.ts` 新增 `Typo09Hit` 接口(**7 字段**:rule/text/position/match/correct/category/reason)+ `HOMOPHONE_PAIRS` 静态词表常量(**3 类 50 条 "correct/incorrect/category/reason" 对**:tech 技术/产品文案 15 条 布署→部署/帐号→账号/登陆→登录 等 + general 通用中文 20 条 截至→截止/制订→制定/权力→权利 等 + idiom 成语 15 条 穿流不息→川流不息/再接再励→再接再厉/黄梁梦→黄粱梦 等)+ `checkTypo09` 函数(零依赖纯字符串查表 + **长词优先匹配** 按 incorrect.length 降序 + **区间去重** 防子串重复报,沿用 R-TYPO-08 实现模式)+ POST handler 13 规则累加(score 上限 5 分,单条 TYPO-09 上限 3 分)+ GET 元信息 13 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09` + `rules_skipped` 移除 R-TYPO-01(已被 R-TYPO-09 接管)+ 文档 §1/§2.3/§3.11/§6.8/§7/§8 全部对齐 + `docs/审查规则/v0.1_...md` §3 增 R-TYPO-09 规则定义(词表/算法/示例)+ §10 变更记录追加 0917 行;**`npx tsc --noEmit` / `npx eslint .` / `npx next build` 三验证通过**(代码 1270 → 1428 行 +158 行)+ 8 个 curl 端到端用例全过(T1 GET 13 规则 + R-TYPO-01 已移除 / T2 PASS 文案 / T3 tech 类命中 3 处: 布署→部署 + 登陆→登录 + 帐号→账号,扣 3 分 / T4 general 类命中 3 处: 截至→截止 + 制订→制定 + 权力→权利,扣 3 分 / T5 idiom 类命中 1 处: 再接再励→再接再厉,扣 1 分 / T6 多规则累加: typo09 1 处(布署→部署) + typo08 2 处(稳赚不赔 promise + 最佳 absolute) 多规则累加 4 分 / T7 长词优先去重: "原本那条穿流不息的小河" 命中 1 处"穿流不息"→"川流不息",未被"穿流"+"不息"拆开误报 / T8 多处不同位置不重叠: "先布署再登陆帐号" 命中 3 处: 布署@pos 1 + 登陆@pos 4 + 帐号@pos 6,扣 3 分 / T9 错误响应 400);**无 plan,临时决策**(0910-0911-0912-0913-0914-0915-0916-0917 漂移模式第 8 天延续,0829 起 `.plan/` 漂移模式已稳定 19 天;**0825-0917 共 22 个 T4/T5 周期**;0913 断档后第二次连续 4 期(0914/0915/0916/0917)巡检期未兑现"补登 0913 巡检日志"建议,0917 巡检"必须决策"项升级;0917 T5 一次性兑现"补登 0913 巡检日志" + "路线图 A 一项轻量交付" + "持续延续'主计划落痕 + audit-api 扩展'双轨任务节奏"3 项最高优建议,合并为同次 commit 落地 1 项 .Log/ 补登 + 1 项轻量交付);**Phase 1 §6 模块 1 从 12 规则扩到 13 规则,代码资产 0.7 → 0.8 起步;0917 巡检"特别建议路线图 A" 100% 兑现**;R-TYPO-09 选型理由:① 零依赖纯字符串查表 + 2-4 字词避免单字"是"/"的"误报,沿用 R-TYPO-08 架构(同"零依赖静态词表"族,纯字符串查表无外部依赖);② "correct" 字段直接驱动客户端"查找替换"提示,与 R-TYPO-08(只报不替换)差异化;③ "reason" 字段说明替换原因(如"军事/技术正式写法"),提升校对透明度;④ 3 类 category 字段(tech / general / idiom)便于客户端差异化提示(技术规范 vs 校对规范 vs 成语规范);⑤ R-TYPO-01 命名空间被 R-TYPO-09 接管(原 R-TYPO-01 需 hanlp 字典,本次改为零依赖静态词表实现);⑥ 50 条 Top 50 子集覆盖校对场景 80% 常见同音字/形近字/近音字错误;**v0.2 后续可接 LLM 二次校验做上下文豁免**(对齐 v0.1 §4.3 上下文豁免原则,如"支付宝"作为支付品牌不算"支付"错误);**Phase 1 §6 模块 1 13 规则扩展,后续可启动 §6 模块 4/5/6/7 或继续扩 R-TYPO-10+ 错别字/量词等** | 03:30 T5 cron |
+| 2026-09-20 | v0.1 API 八次增量 R-TYPO-10 标点后空格缺失(pangu 同族,**13 → 14 规则扩展**,采纳 0920 巡检"特别建议路线图 A'(audit-text v0.2 R-TYPO-10/R-TONE-05/R-READ-04 同族零依赖规则)",采纳方案 A'(沿用 0917 T5 R-TYPO-09 同族扩展路径,与 §6 模块 1 v0.2 R-TYPO-09 子项已勾选对称)):`app/api/audit/text/route.ts` 新增 `Typo10Hit` 接口(**6 字段**:rule/text/position/match/punct/ascii_char/direction)+ 2 个独立 regex 常量 `PUNCT_CJK_ASCII_RE = /[，。！？；：][A-Za-z]/g` 扫 CJK 标点 + ASCII 字母 + `PUNCT_ASCII_ASCII_RE = /[,.;:!?][A-Za-z]/g` 扫 ASCII 标点 + ASCII 字母(避免千位符/小数点误报,只对字母报)+ `checkTypo10` 函数(2 个独立 regex 双向独立,合并后 position 升序,沿用 R-TYPO-06 实现模式)+ POST handler 14 规则累加(score 上限 5 分,单条 TYPO-10 上限 3 分)+ GET 元信息 14 规则全部注册 + `version` 升级 `0.1.0-API-雏形+R-READ-02+5-零依赖规则+R-TYPO-06+R-TYPO-07+R-READ-03+R-TONE-04+R-TYPO-08+R-TYPO-09+R-TYPO-10` + 文档 §1/§2.3/§3.12/§6.9/§7/§8 全部对齐 + `docs/审查规则/v0.1_...md` §3 增 R-TYPO-10 规则定义(regex/算法/示例)+ §10 变更记录追加 0920 行;**`npx tsc --noEmit` / `npx eslint .` / `npx next build` 三验证通过**(代码 1428 → 1535 行 +107 行)+ 6 个 curl 端到端用例全过(T1 GET 14 规则 + R-TYPO-10 已注册 / T2 PASS 中文内文不报 / T3 CJK 标点 + ASCII 命中 1 处 "，w" / T4 ASCII 标点 + ASCII 字母命中 1 处 ",w" / T5 千位符/小数点不报 / T6 中文内文标点后接中文正常 / T7 多规则累加 typo09 3 处 + typo10 1 处 累加 5 分上限);**无 plan,临时决策**(0918-0919-0920 漂移模式第 22 天延续,0829 起 `.plan/` 漂移模式已稳定 22 天;**0825-0920 共 25 个 T4/T5 周期**);**Phase 1 §6 模块 1 从 13 规则扩到 14 规则,代码资产 0.8 → 0.9 起步;0920 巡检"特别建议路线图 A'" 100% 兑现**;**0914-0920 巡检累计建议兑现率 16/16(100%,连续 7 期零断档兑现)**;R-TYPO-10 选型理由:① 零依赖纯 regex + 2 个独立 regex 双向独立(沿用 R-TYPO-06 经验,避免 matchAll 消费漏检);② 不报千位符/小数点(ASCII 标点 + 数字场景不报,只对字母报,避免误报);③ 不报连续标点(ASCII 标点 + ASCII 标点由 R-TYPO-07 处理);④ 不报中文内文(CJK 标点 + CJK 字符场景不报,中文排版通常无空格);⑤ 2 个 direction 字段分类(cjk-punct-ascii / ascii-punct-ascii-letter)便于客户端差异化提示(中文排版 vs 英文排版);⑥ "punct" + "ascii_char" 字段客户端可精确还原"哪个标点后接哪个字母",便于插入空格提示;⑦ 与 R-TYPO-06 形成完整"标点 + ASCII"双向覆盖(R-TYPO-06 覆盖"数字/英文 ↔ 中文"组合,R-TYPO-10 覆盖"标点 + ASCII"组合);**v0.2 后续可接 LLM 二次校验做上下文豁免**(对齐 v0.1 §4.3 上下文豁免原则,如"Mr." / "i.e." 等英文缩写 + 末位标点不报);**Phase 1 §6 模块 1 14 规则扩展,后续可启动 §6 模块 4/5/6/7 或继续扩 R-TYPO-11+ 错别字/量词/语气等** | 03:30 T5 cron |
